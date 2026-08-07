@@ -1,0 +1,15 @@
+
+****** SANY2 Version 2.2 created 08 July 2020
+
+Parsing file /private/var/folders/2q/79m85_bj1qlbkz3sts_bdfl00000gn/T/tmp.cY2jfIlOz5/Sem.tla
+Semantic processing of module Sem
+Semantic errors:
+
+*** Errors: 1
+
+line 3, col 13 to line 3, col 23 of module Sem
+
+Unknown operator: `undefinedOp'.
+
+
+Linting of module Sem

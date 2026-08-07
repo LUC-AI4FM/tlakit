@@ -1,0 +1,164 @@
+"""Run SANY and TLC as subprocesses.
+
+Each invocation gets its own working directory. TLC writes
+`<Module>_TTrace_<timestamp>.tla` and `.bin` files next to the spec, and
+leftovers from a previous run of a different module make later runs fail with
+exit 255 (verified 2026-08-07).
+"""
+from __future__ import annotations
+
+import os
+import shutil
+import signal
+import subprocess
+import tempfile
+from pathlib import Path
+
+from .jar import find_community_jar, find_tools_jar
+from .parse import parse_sany, parse_tlc
+from .result import CheckResult, Diagnostic, Outcome, RawOutput, Severity, Stats
+from .trace import load_trace
+
+TRACE_FILE = "trace.json"
+
+
+class JavaNotFound(FileNotFoundError):
+    """Raised when no `java` executable can be located."""
+
+
+def java_executable() -> str:
+    """Path to the `java` binary the TLA+ tools should run under.
+
+    Honours TLAKIT_JAVA, then PATH. Raises rather than letting the failure
+    surface later as a ClassNotFoundException.
+    """
+    java = os.environ.get("TLAKIT_JAVA") or shutil.which("java")
+    if java is None:
+        raise JavaNotFound(
+            "No `java` executable found. The TLA+ tools need a JRE. Install one "
+            "(for example `brew install temurin`) or set TLAKIT_JAVA to its path."
+        )
+    return java
+
+
+#: Retained for internal call sites.
+_java = java_executable
+
+
+class CliRunner:
+    """Invoke the TLA+ tools via `java -cp tla2tools.jar`."""
+
+    def __init__(
+        self,
+        tools_jar: Path | None = None,
+        community_jar: Path | None = None,
+    ) -> None:
+        self.tools_jar = find_tools_jar(tools_jar)
+        self.community_jar = find_community_jar(community_jar)
+
+    def _classpath(self) -> str:
+        parts = [str(self.tools_jar)]
+        if self.community_jar is not None:
+            parts.append(str(self.community_jar))
+        return os.pathsep.join(parts)
+
+    def _run(
+        self, argv: list[str], cwd: Path, timeout: float | None
+    ) -> tuple[RawOutput, bool]:
+        """Return (raw, timed_out). Never raises on tool failure."""
+        proc = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+            return RawOutput(argv, proc.returncode, stdout, stderr), False
+        except subprocess.TimeoutExpired:
+            # start_new_session put the JVM in its own process group; kill the
+            # whole group, otherwise a stranded TLC keeps eating the machine.
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                proc.kill()
+            stdout, stderr = proc.communicate()
+            return RawOutput(argv, None, stdout, stderr), True
+
+    def parse(self, source: str, module: str) -> CheckResult:
+        """Syntax- and level-check a module with SANY."""
+        with tempfile.TemporaryDirectory(prefix="tlakit-") as tmp:
+            work = Path(tmp)
+            (work / f"{module}.tla").write_text(source)
+            argv = [
+                _java(),
+                "-cp",
+                self._classpath(),
+                "tla2sany.SANY",
+                f"{module}.tla",
+            ]
+            raw, _ = self._run(argv, work, timeout=None)
+
+        diagnostics = parse_sany(raw.stdout)
+        # SANY exits 0 even when it reports semantic errors, so diagnostics
+        # take precedence over the exit code.
+        if diagnostics:
+            outcome = Outcome.PARSE_ERROR
+        elif raw.exit_code == 0:
+            outcome = Outcome.OK
+        else:
+            outcome = Outcome.ERROR
+            diagnostics = [
+                Diagnostic(
+                    Severity.ERROR,
+                    f"SANY exited with code {raw.exit_code}; see result.raw.",
+                )
+            ]
+        return CheckResult(outcome, diagnostics, None, Stats(), raw, source=source)
+
+    def check(
+        self,
+        source: str,
+        module: str,
+        config: str,
+        timeout: float | None = None,
+        extra_opts: list[str] | None = None,
+    ) -> CheckResult:
+        """Model-check a module with TLC."""
+        with tempfile.TemporaryDirectory(prefix="tlakit-") as tmp:
+            work = Path(tmp)
+            (work / f"{module}.tla").write_text(source)
+            (work / f"{module}.cfg").write_text(config)
+            argv = [
+                _java(),
+                "-cp",
+                self._classpath(),
+                "tlc2.TLC",
+                "-config",
+                f"{module}.cfg",
+                "-dumpTrace",
+                "json",
+                TRACE_FILE,
+                *(extra_opts or []),
+                f"{module}.tla",
+            ]
+            raw, timed_out = self._run(argv, work, timeout)
+            trace = load_trace(work / TRACE_FILE)
+
+        if timed_out:
+            _, diagnostics, stats = parse_tlc(raw.stdout, None)
+            diagnostics = [
+                Diagnostic(
+                    Severity.ERROR,
+                    f"TLC did not finish within {timeout}s. Statistics below "
+                    "are partial.",
+                )
+            ] + diagnostics
+            return CheckResult(
+                Outcome.TIMEOUT, diagnostics, trace, stats, raw, source=source
+            )
+
+        outcome, diagnostics, stats = parse_tlc(raw.stdout, raw.exit_code)
+        return CheckResult(outcome, diagnostics, trace, stats, raw, source=source)

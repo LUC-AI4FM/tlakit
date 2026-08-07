@@ -43,6 +43,45 @@ already exists and works; tlakit consumes it.
 | Browser interpreter, trace sharing | Spectacle (`will62794/spectacle`) | out of scope for v1 |
 | Structured tool API | `vscode-tlaplus` MCP server (`src/lm/MCPServer.ts`) | optional backend |
 | Interactive lessons | `tlaplus/tla-by-example` (learning.tlapl.us) | not overlapping; complementary |
+| Counterexample visualization, state-graph folding, LLM digest | ModelWisdom (FM 2026 tool track, arXiv 2602.12058) | **do not compete**; see below |
+| Agentic spec generation and bug reproduction | Specula (`specula-org/Specula`, Apache-2.0, arXiv 2607.25333) | prospective *consumer* of tlakit |
+| TLA+ parser and syntax tree in Python | `tla` on PyPI (`johnyf/tla`, Ioannis Filippidis) | complementary; owns the AST niche |
+
+### tlakit is not an umbrella project
+
+The temptation is to position tlakit as a unifying toolkit for TLA+. It should
+not be, for two reasons.
+
+First, the umbrella already exists: the TLA+ Foundation under the Linux
+Foundation, with AWS, Oracle, and Microsoft as inaugural members, and
+`tlaplus/devkit` as the official guidance for building TLA+ tools. A
+declaration of umbrella status from outside that structure would be a claim
+nobody granted.
+
+Second, every position an umbrella would occupy is already held by a project
+with a publication behind it: ModelWisdom for visualization and repair,
+Specula for agentic bug finding, Spectacle for interactive exploration,
+vscode-tlaplus for the IDE and the MCP surface, learning.tlapl.us for teaching.
+Competing with all of them at once is how a project earns no users and several
+annoyed maintainers.
+
+The defensible position is narrower and more useful: **tlakit is a substrate,
+not an umbrella.** It is the boring shared layer that runs the tools and
+returns structured results, so that other projects stop writing their own.
+Umbrella status, if it ever arrives, is earned by adoption rather than claimed
+in a README.
+
+The evidence that the substrate is wanted is inside Specula, which contains
+three separate, unshared TLC integrations:
+
+- `tools/inv_checking_tool/src/tlc_output_reader.py` — 787 lines, including its
+  own `-dumpTrace json` unwrapping
+- `tools/trace_debugger/src/executor/tlc_process.py` — 159 lines, drives TLC's
+  DAP debugger on port 4712
+- `tools/spec_analyzer/src/spec_mcp/handlers/vav_handler.py`
+
+One repository, three answers to the same question. That is the gap, and it is
+a contribution to Specula rather than a competitor to it.
 
 Two earlier attempts at the notebook problem specifically:
 
@@ -234,6 +273,14 @@ M1 alone is already more than any maintained tool offers from Python.
 4. **Scope creep toward reimplementation.** Every capability in the prior-art
    table is a standing decision not to build. Changing one is a design change,
    not an implementation detail.
+5. **Collision with ModelWisdom over visualization.** ModelWisdom (FM 2026 tool
+   track) already does colorized violation highlighting, clickable
+   transitions into source, state-graph folding, and LLM-based subgraph digest.
+   The M2 `StateGraph` widget as originally scoped overlaps it directly.
+   Mitigation: keep tlakit's rendering to what a notebook cell needs — the
+   trace table and the animation player — and treat large-state-graph
+   exploration as ModelWisdom's ground. Revisit only if they publish an API
+   worth calling.
 
 ## Upstream contributions
 
@@ -243,6 +290,24 @@ M1 alone is already more than any maintained tool offers from Python.
    small. File against `tlaplus/vscode-tlaplus` with the spike attached.
 2. **Python MCP client.** If the above lands, the client written for `McpRunner`
    is useful to anyone driving the toolchain from Python.
+3. **Talk to Specula before proposing anything.** The first plan was to replace
+   `inv_checking_tool`'s `-dumpTrace json` handling with tlakit. Reading the code
+   killed that idea: `TLCOutputReader` is not a parser, it is a trace *query* API
+   built for LLM agents — `get_variable_at_path`, `compare_states`,
+   `find_variable_changes`, `search_states`, negative and range indexing, text-mode
+   fallback for when no JSON counterexample exists. tlakit overlapped roughly 40
+   of its 787 lines. A pull request that swaps 40 lines for a new third-party
+   dependency is a bad trade for them and would deserve to be rejected.
+
+   The honest sequence is an issue first, asking whether a shared layer is wanted
+   and pointing at the three unshared integrations, then code only if they say yes.
+
+   The borrowing has in fact run the other way. Testing tlakit against Specula's
+   own trace fixture exposed a defect — tlakit assumed TLC's `counterexample`
+   wrapper and returned zero states for the unwrapped shape that tooling actually
+   stores — and `TLCOutputReader`'s surface is what `Trace.variables`,
+   `Trace.value_at`, `Trace.changes`, and `Trace.compare` were modelled on. Being
+   a substrate started by learning from a consumer, not by refactoring one.
 
 ## Out of scope for v1
 

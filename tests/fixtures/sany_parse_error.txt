@@ -1,0 +1,28 @@
+
+****** SANY2 Version 2.2 created 08 July 2020
+
+Parsing file /private/var/folders/2q/79m85_bj1qlbkz3sts_bdfl00000gn/T/tmp.SoJ0u2ZIRf/Broken.tla
+***Parse Error***
+Encountered "====" at line 4, column 1 and token "=" 
+
+Residual stack trace follows:
+ExtendableExpr starting at line 4, column 1.
+ExtendableExpr starting at line 3, column 9.
+Expression starting at line 3, column 9.
+Definition starting at line 3, column 1.
+Module body starting at line 2, column 1.
+
+
+Fatal errors while parsing TLA+ spec in file Broken.tla
+
+In module Broken
+
+Could not parse module Broken from file Broken.tla
+*** Errors: 1
+
+In module Broken
+
+Could not parse module Broken from file Broken.tla
+
+
+

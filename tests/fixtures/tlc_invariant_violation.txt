@@ -1,0 +1,44 @@
+TLC2 Version 2026.03.19.000345 (rev: 30a4862)
+Warning: Please run the Java VM, which executes TLC with a throughput optimized garbage collector, by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 114 and seed 4353922477792855758 with 1 worker on 10 cores with 16384MB heap and 64MB offheap memory [pid: 75736] (Mac OS X 26.5.2 aarch64, Eclipse Adoptium 25 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/var/folders/2q/79m85_bj1qlbkz3sts_bdfl00000gn/T/tmp.txkcSX2OZG/Spike.tla
+Parsing file /private/var/folders/2q/79m85_bj1qlbkz3sts_bdfl00000gn/T/tlc-1734165714051850466/Naturals.tla (jar:file:/private/tmp/claude-501/-Users-eric/9a44bd6f-81c9-4566-8526-5d5e1337a2df/scratchpad/vscode-tlaplus/tools/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /private/var/folders/2q/79m85_bj1qlbkz3sts_bdfl00000gn/T/tlc-1734165714051850466/_TLCTrace.tla (jar:file:/private/tmp/claude-501/-Users-eric/9a44bd6f-81c9-4566-8526-5d5e1337a2df/scratchpad/vscode-tlaplus/tools/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /private/var/folders/2q/79m85_bj1qlbkz3sts_bdfl00000gn/T/tlc-1734165714051850466/TLC.tla (jar:file:/private/tmp/claude-501/-Users-eric/9a44bd6f-81c9-4566-8526-5d5e1337a2df/scratchpad/vscode-tlaplus/tools/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /private/var/folders/2q/79m85_bj1qlbkz3sts_bdfl00000gn/T/tlc-1734165714051850466/TLCExt.tla (jar:file:/private/tmp/claude-501/-Users-eric/9a44bd6f-81c9-4566-8526-5d5e1337a2df/scratchpad/vscode-tlaplus/tools/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /private/var/folders/2q/79m85_bj1qlbkz3sts_bdfl00000gn/T/tlc-1734165714051850466/Sequences.tla (jar:file:/private/tmp/claude-501/-Users-eric/9a44bd6f-81c9-4566-8526-5d5e1337a2df/scratchpad/vscode-tlaplus/tools/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /private/var/folders/2q/79m85_bj1qlbkz3sts_bdfl00000gn/T/tlc-1734165714051850466/FiniteSets.tla (jar:file:/private/tmp/claude-501/-Users-eric/9a44bd6f-81c9-4566-8526-5d5e1337a2df/scratchpad/vscode-tlaplus/tools/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /private/var/folders/2q/79m85_bj1qlbkz3sts_bdfl00000gn/T/tlc-1734165714051850466/Integers.tla (jar:file:/private/tmp/claude-501/-Users-eric/9a44bd6f-81c9-4566-8526-5d5e1337a2df/scratchpad/vscode-tlaplus/tools/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Integers
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module Spike
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module Spike
+Starting... (2026-08-07 10:49:51)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-08-07 10:49:51.
+Error: Invariant Inv is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+x = 0
+
+State 2: <Next line 5, col 9 to line 5, col 18 of module Spike>
+x = 1
+
+State 3: <Next line 5, col 9 to line 5, col 18 of module Spike>
+x = 2
+
+State 4: <Next line 5, col 9 to line 5, col 18 of module Spike>
+x = 3
+
+4 states generated, 4 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 4.
+Finished in 00s at (2026-08-07 10:49:51)
+Trace exploration spec path: ./Spike_TTrace_1786117791.tla

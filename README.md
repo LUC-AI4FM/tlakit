@@ -53,7 +53,14 @@ implementation plan.
 - TLA+ tools **v1.8.0 or newer** — tlakit runs TLC with `-dumpTrace json`;
   v1.7.4 (TLC 2.19) does not have that option
 
-Point tlakit at the TLA+ tools with `TLAKIT_TLA2TOOLS=/path/to/tla2tools.jar`.
+Fetch the pinned, checksummed tools:
+
+```bash
+python -m tlakit.install
+```
+
+Or point tlakit at jars you already have with
+`TLAKIT_TLA2TOOLS=/path/to/tla2tools.jar`.
 `TLAKIT_COMMUNITY_MODULES` optionally locates `CommunityModules-deps.jar`, which
 `SVG.tla` and `Json.tla` need.
 

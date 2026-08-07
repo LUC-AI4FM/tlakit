@@ -12,6 +12,7 @@ All the decisions live in `tlakit.serve`; this file only routes.
 import asyncio
 import hmac
 import os
+import pathlib
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Header, HTTPException
@@ -26,10 +27,26 @@ from . import Limits, RequestTooLarge, as_json, clamp_timeout, startup_checks, v
 #: Worker supplies it, so learning the tunnel hostname is not enough to reach
 #: the service directly.
 KEY_ENV = "TLAKIT_SERVE_KEY"
+#: Preferred over KEY_ENV under launchd: a plist is world-readable, so the
+#: secret lives in a mode-640 file that only the service's group can read.
+KEY_FILE_ENV = "TLAKIT_SERVE_KEY_FILE"
+
+
+def expected_key() -> Optional[str]:
+    path = os.environ.get(KEY_FILE_ENV)
+    if path:
+        try:
+            value = pathlib.Path(path).read_text().strip()
+        except OSError:
+            # Refuse every request rather than silently serving unauthenticated
+            # because the key file went missing.
+            return "\x00unreadable"
+        return value or None
+    return os.environ.get(KEY_ENV) or None
 
 
 def require_key(supplied: Optional[str]) -> None:
-    expected = os.environ.get(KEY_ENV)
+    expected = expected_key()
     if not expected:
         return  # unset means local development; bind to localhost.
     # Constant-time: a timing oracle on a shared secret is worth avoiding even
@@ -81,7 +98,7 @@ def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = No
             "ok": True,
             "isolated": True,
             "community_modules": False,
-            "key_required": bool(os.environ.get(KEY_ENV)),
+            "key_required": bool(expected_key()),
             "limits": {
                 "spec_bytes": limits.spec_bytes,
                 "max_timeout": limits.max_timeout,

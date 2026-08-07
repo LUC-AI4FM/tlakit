@@ -249,3 +249,44 @@ def test_the_live_service_rejects_a_missing_key(monkeypatch):
     assert guarded.get("/health", headers={"X-Tlakit-Key": "s3cret"}).json()[
         "key_required"
     ] is True
+
+
+def test_key_can_come_from_a_file(monkeypatch, tmp_path):
+    """A launchd plist is world-readable, so the secret lives in a 640 file."""
+    from fastapi import HTTPException
+
+    from tlakit.serve.app import KEY_ENV, KEY_FILE_ENV, expected_key, require_key
+
+    keyfile = tmp_path / "serve.key"
+    keyfile.write_text("from-a-file\n")   # trailing newline must be stripped
+    monkeypatch.delenv(KEY_ENV, raising=False)
+    monkeypatch.setenv(KEY_FILE_ENV, str(keyfile))
+
+    assert expected_key() == "from-a-file"
+    require_key("from-a-file")
+    with pytest.raises(HTTPException):
+        require_key("from-a-file\n")
+
+
+def test_the_key_file_takes_precedence_over_the_variable(monkeypatch, tmp_path):
+    from tlakit.serve.app import KEY_ENV, KEY_FILE_ENV, expected_key
+
+    keyfile = tmp_path / "serve.key"
+    keyfile.write_text("file-wins")
+    monkeypatch.setenv(KEY_ENV, "env-loses")
+    monkeypatch.setenv(KEY_FILE_ENV, str(keyfile))
+    assert expected_key() == "file-wins"
+
+
+def test_an_unreadable_key_file_locks_everything_out(monkeypatch, tmp_path):
+    """Failing open because the key file vanished would be the worst outcome."""
+    from fastapi import HTTPException
+
+    from tlakit.serve.app import KEY_ENV, KEY_FILE_ENV, require_key
+
+    monkeypatch.delenv(KEY_ENV, raising=False)
+    monkeypatch.setenv(KEY_FILE_ENV, str(tmp_path / "does-not-exist"))
+    for attempt in (None, "", "anything"):
+        with pytest.raises(HTTPException) as exc:
+            require_key(attempt)
+        assert exc.value.status_code == 401

@@ -1,4 +1,5 @@
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -87,7 +88,8 @@ def test_raw_is_always_populated(runner):
     result = runner.check(OK, "Ok", OK_CFG)
     assert result.raw.exit_code == 0
     assert "TLC2 Version" in result.raw.stdout
-    assert result.raw.argv[0].endswith("java")
+    # java.exe on Windows.
+    assert Path(result.raw.argv[0]).stem == "java"
 
 
 def test_timeout_returns_partial_result_not_an_exception(runner):

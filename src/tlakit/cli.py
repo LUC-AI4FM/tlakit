@@ -99,8 +99,13 @@ class CliRunner:
     def __init__(
         self,
         tools_jar: Path | None = None,
-        community_jar: Path | None = None,
+        community_jar: Path | None | bool = None,
     ) -> None:
+        """`community_jar=False` refuses CommunityModules entirely.
+
+        Use that for untrusted input: it ships `IOUtils!IOExec`, which runs
+        shell commands from inside a specification.
+        """
         self.tools_jar = find_tools_jar(tools_jar)
         self.community_jar = find_community_jar(community_jar)
 

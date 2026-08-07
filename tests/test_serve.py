@@ -198,3 +198,54 @@ def test_only_health_and_check_are_routed(client):
         code = client.get(path).status_code
         assert code in (200, 404), path  # openapi is fine; nothing else exists
     assert client.get("/files").status_code == 404
+
+
+# --- shared key with the edge Worker -------------------------------------
+
+
+def test_no_key_configured_means_open(monkeypatch):
+    from tlakit.serve.app import KEY_ENV, require_key
+
+    monkeypatch.delenv(KEY_ENV, raising=False)
+    require_key(None)  # local development must not need a header
+
+
+def test_a_configured_key_is_required(monkeypatch):
+    from fastapi import HTTPException
+
+    from tlakit.serve.app import KEY_ENV, require_key
+
+    monkeypatch.setenv(KEY_ENV, "s3cret")
+    require_key("s3cret")
+    for bad in (None, "", "wrong", "s3cre"):
+        with pytest.raises(HTTPException) as exc:
+            require_key(bad)
+        assert exc.value.status_code == 401
+
+
+@pytest.mark.java
+def test_the_live_service_rejects_a_missing_key(monkeypatch):
+    from tlakit.jar import JarNotFound
+    from tlakit.serve.app import KEY_ENV, create_app
+
+    if shutil.which("java") is None:
+        pytest.skip("java not on PATH")
+    try:
+        isolated_jar_dir()
+    except JarNotFound as exc:
+        pytest.skip(str(exc))
+
+    monkeypatch.setenv(KEY_ENV, "s3cret")
+    guarded = TestClient(create_app())
+
+    assert guarded.post("/check", json={"spec": SPEC}).status_code == 401
+    assert guarded.get("/health").status_code == 401
+    ok = guarded.post(
+        "/check", json={"spec": SPEC, "invariants": ["Inv"]},
+        headers={"X-Tlakit-Key": "s3cret"},
+    )
+    assert ok.status_code == 200
+    assert ok.json()["outcome"] == "invariant_violation"
+    assert guarded.get("/health", headers={"X-Tlakit-Key": "s3cret"}).json()[
+        "key_required"
+    ] is True

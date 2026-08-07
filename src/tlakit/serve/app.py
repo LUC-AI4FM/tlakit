@@ -10,14 +10,32 @@ All the decisions live in `tlakit.serve`; this file only routes.
 """
 
 import asyncio
+import hmac
+import os
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from ..api import build_config, module_name_of
 from ..cli import CliRunner
 from . import Limits, RequestTooLarge, as_json, clamp_timeout, startup_checks, validate
+
+
+#: When set, every request must present this value in X-Tlakit-Key. The edge
+#: Worker supplies it, so learning the tunnel hostname is not enough to reach
+#: the service directly.
+KEY_ENV = "TLAKIT_SERVE_KEY"
+
+
+def require_key(supplied: Optional[str]) -> None:
+    expected = os.environ.get(KEY_ENV)
+    if not expected:
+        return  # unset means local development; bind to localhost.
+    # Constant-time: a timing oracle on a shared secret is worth avoiding even
+    # behind a rate limiter.
+    if supplied is None or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="missing or invalid key")
 
 
 class CheckRequest(BaseModel):
@@ -55,11 +73,15 @@ def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = No
     )
 
     @app.get("/health")
-    async def health() -> Dict[str, Any]:
+    async def health(
+        x_tlakit_key: Optional[str] = Header(default=None)
+    ) -> Dict[str, Any]:
+        require_key(x_tlakit_key)
         return {
             "ok": True,
             "isolated": True,
             "community_modules": False,
+            "key_required": bool(os.environ.get(KEY_ENV)),
             "limits": {
                 "spec_bytes": limits.spec_bytes,
                 "max_timeout": limits.max_timeout,
@@ -68,7 +90,11 @@ def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = No
         }
 
     @app.post("/check")
-    async def check(payload: CheckRequest) -> Dict[str, Any]:
+    async def check(
+        payload: CheckRequest,
+        x_tlakit_key: Optional[str] = Header(default=None),
+    ) -> Dict[str, Any]:
+        require_key(x_tlakit_key)
         config = payload.config or ""
         try:
             validate(payload.spec, config, limits)

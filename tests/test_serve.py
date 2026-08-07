@@ -364,3 +364,50 @@ def test_the_page_is_still_gated_when_a_key_is_configured(monkeypatch):
     # The page is public by design; the API behind it is not.
     assert guarded.get("/").status_code == 200
     assert guarded.post("/check", json={"spec": SPEC}).status_code == 401
+
+
+# --- rate limiting and headers -------------------------------------------
+
+
+@pytest.mark.java
+def test_check_is_rate_limited_per_client(client):
+    from tlakit.serve.limiter import CHECK_RULES
+
+    body = {"spec": "---- MODULE M ----\nVARIABLE x\nInit == x = 0\n===="}
+    headers = {"CF-Connecting-IP": "203.0.113.77"}
+    codes = [
+        client.post("/check", json=body, headers=headers).status_code
+        for _ in range(CHECK_RULES[0].limit + 3)
+    ]
+    assert 429 in codes, codes
+    limited = client.post("/check", json=body, headers=headers)
+    assert limited.status_code == 429
+    assert "retry-after" in limited.headers
+
+
+@pytest.mark.java
+def test_a_different_client_is_unaffected(client):
+    from tlakit.serve.limiter import CHECK_RULES
+
+    body = {"spec": "---- MODULE M ----\nVARIABLE x\nInit == x = 0\n===="}
+    for _ in range(CHECK_RULES[0].limit + 2):
+        client.post("/check", json=body, headers={"CF-Connecting-IP": "198.51.100.1"})
+    other = client.post("/check", json=body, headers={"CF-Connecting-IP": "198.51.100.2"})
+    assert other.status_code != 429
+
+
+@pytest.mark.java
+def test_security_headers_are_present(client):
+    h = client.get("/").headers
+    assert h["x-content-type-options"] == "nosniff"
+    assert h["x-frame-options"] == "DENY"
+    assert h["referrer-policy"] == "no-referrer"
+    assert "max-age=" in h["strict-transport-security"]
+    assert h["cache-control"] == "no-store"
+
+
+@pytest.mark.java
+def test_health_advertises_the_rate_limits(client):
+    lim = client.get("/health", headers={"CF-Connecting-IP": "192.0.2.5"}).json()["limits"]
+    assert lim["checks_per_minute"] >= 1
+    assert lim["checks_per_hour"] >= lim["checks_per_minute"]

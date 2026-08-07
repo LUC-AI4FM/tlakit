@@ -16,7 +16,7 @@ import os
 import pathlib
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -24,6 +24,7 @@ from ..api import build_config, module_name_of
 from ..result import Outcome
 from ..cli import CliRunner
 from . import Limits, RequestTooLarge, as_json, clamp_timeout, startup_checks, validate
+from .limiter import CHEAP_RULES, CHECK_RULES, RateLimiter, client_key
 
 
 #: When set, every request must present this value in X-Tlakit-Key. The edge
@@ -84,6 +85,21 @@ def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = No
     runner = runner or public_runner()
     startup_checks(runner)
     gate = asyncio.Semaphore(limits.concurrency)
+    check_limiter = RateLimiter(rules=CHECK_RULES)
+    cheap_limiter = RateLimiter(rules=CHEAP_RULES)
+
+    def enforce(limiter: RateLimiter, request: Request) -> None:
+        key = client_key(
+            request.headers.get("cf-connecting-ip"),
+            request.client.host if request.client else None,
+        )
+        wait = limiter.check(key)
+        if wait is not None:
+            raise HTTPException(
+                status_code=429,
+                detail=f"rate limit exceeded; retry in {wait:g}s",
+                headers={"retry-after": str(int(wait) + 1)},
+            )
 
     app = FastAPI(
         title="tla-runner",
@@ -99,8 +115,27 @@ def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = No
     # something else.
     landing = (pathlib.Path(__file__).parent / "static" / "index.html").read_text()
 
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("x-content-type-options", "nosniff")
+        response.headers.setdefault("referrer-policy", "no-referrer")
+        response.headers.setdefault("x-frame-options", "DENY")
+        response.headers.setdefault(
+            "cross-origin-opener-policy", "same-origin"
+        )
+        # This service is served over Cloudflare, so HSTS is safe to assert.
+        response.headers.setdefault(
+            "strict-transport-security", "max-age=31536000; includeSubDomains"
+        )
+        # Nothing here is cacheable and a shared cache holding a counterexample
+        # keyed by URL would be surprising.
+        response.headers.setdefault("cache-control", "no-store")
+        return response
+
     @app.get("/", response_class=HTMLResponse)
-    async def index() -> HTMLResponse:
+    async def index(request: Request) -> HTMLResponse:
+        enforce(cheap_limiter, request)
         return HTMLResponse(
             landing,
             headers={
@@ -120,8 +155,10 @@ def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = No
 
     @app.get("/health")
     async def health(
-        x_tlakit_key: Optional[str] = Header(default=None)
+        request: Request,
+        x_tlakit_key: Optional[str] = Header(default=None),
     ) -> Dict[str, Any]:
+        enforce(cheap_limiter, request)
         require_key(x_tlakit_key)
         return {
             "ok": True,
@@ -129,6 +166,8 @@ def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = No
             "community_modules": False,
             "key_required": bool(expected_key()),
             "limits": {
+                "checks_per_minute": CHECK_RULES[0].limit,
+                "checks_per_hour": CHECK_RULES[1].limit,
                 "spec_bytes": limits.spec_bytes,
                 "max_timeout": limits.max_timeout,
                 "concurrency": limits.concurrency,
@@ -138,8 +177,12 @@ def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = No
     @app.post("/check")
     async def check(
         payload: CheckRequest,
+        request: Request,
         x_tlakit_key: Optional[str] = Header(default=None),
     ) -> Dict[str, Any]:
+        # Rate limit before doing any work, including before validation, so a
+        # flood of malformed requests is just as cheap to refuse.
+        enforce(check_limiter, request)
         require_key(x_tlakit_key)
         config = payload.config or ""
         try:

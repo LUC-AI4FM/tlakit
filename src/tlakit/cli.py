@@ -107,7 +107,7 @@ class CliRunner:
                     f"SANY exited with code {raw.exit_code}; see result.raw.",
                 )
             ]
-        return CheckResult(outcome, diagnostics, None, Stats(), raw)
+        return CheckResult(outcome, diagnostics, None, Stats(), raw, source=source)
 
     def check(
         self,
@@ -147,7 +147,9 @@ class CliRunner:
                     "are partial.",
                 )
             ] + diagnostics
-            return CheckResult(Outcome.TIMEOUT, diagnostics, trace, stats, raw)
+            return CheckResult(
+                Outcome.TIMEOUT, diagnostics, trace, stats, raw, source=source
+            )
 
         outcome, diagnostics, stats = parse_tlc(raw.stdout, raw.exit_code)
-        return CheckResult(outcome, diagnostics, trace, stats, raw)
+        return CheckResult(outcome, diagnostics, trace, stats, raw, source=source)

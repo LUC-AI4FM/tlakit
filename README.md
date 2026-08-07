@@ -39,7 +39,8 @@ INVARIANT Safety
 
 ## Status
 
-Early. M1 (core runner, results, `%%tla` / `%%tlc`) is in progress. See
+M1 is complete: `CliRunner`, normalized results, `%%tla` / `%%tlc` magics,
+and static HTML rendering of counterexamples and diagnostics. See
 `docs/superpowers/specs/` for the design and `docs/superpowers/plans/` for the
 implementation plan.
 

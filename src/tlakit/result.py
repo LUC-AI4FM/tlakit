@@ -120,6 +120,9 @@ class CheckResult:
     trace: Trace | None
     stats: Stats
     raw: RawOutput
+    #: The module source, when the runner knows it. Lets the notebook view
+    #: point at the offending line.
+    source: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -128,3 +131,8 @@ class CheckResult:
     @property
     def errors(self) -> list[Diagnostic]:
         return [d for d in self.diagnostics if d.severity is Severity.ERROR]
+
+    def _repr_html_(self) -> str:
+        from .render import result_html  # lazy: render imports result
+
+        return result_html(self)

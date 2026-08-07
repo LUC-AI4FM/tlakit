@@ -10,7 +10,7 @@ dependencies = ["platformdirs>=4.0"]
 
 [project.optional-dependencies]
 notebook = ["ipython>=8.0"]
-dev = ["pytest>=8.0", "pytest-timeout>=2.0"]
+dev = ["pytest>=8.0", "pytest-timeout>=2.0", "nbmake>=1.5"]
 
 [build-system]
 requires = ["hatchling"]

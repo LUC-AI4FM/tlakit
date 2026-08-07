@@ -17,6 +17,7 @@ import pathlib
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from ..api import build_config, module_name_of
@@ -92,6 +93,30 @@ def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = No
         ),
         version="0.1.0",
     )
+
+    # A single static string, read once at startup. Not a file server: there is
+    # no path parameter anywhere, so no route can be talked into reading
+    # something else.
+    landing = (pathlib.Path(__file__).parent / "static" / "index.html").read_text()
+
+    @app.get("/", response_class=HTMLResponse)
+    async def index() -> HTMLResponse:
+        return HTMLResponse(
+            landing,
+            headers={
+                # The page loads fonts from Google and talks only to itself.
+                "content-security-policy": (
+                    "default-src 'none'; "
+                    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                    "font-src https://fonts.gstatic.com; "
+                    "script-src 'unsafe-inline'; "
+                    "connect-src 'self'; "
+                    "base-uri 'none'; form-action 'none'"
+                ),
+                "referrer-policy": "no-referrer",
+                "x-content-type-options": "nosniff",
+            },
+        )
 
     @app.get("/health")
     async def health(

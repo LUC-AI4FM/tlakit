@@ -320,3 +320,47 @@ def test_startup_accepts_a_readable_isolated_jar(tmp_path):
         community_jar = None
 
     startup_checks(Fake())
+
+
+# --- landing page ---------------------------------------------------------
+
+
+@pytest.mark.java
+def test_the_landing_page_is_served(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    body = response.text
+    assert "tla-runner" in body
+    assert "Instrument+Serif" in body      # the fonts it actually asks for
+    assert "MODULE Microwave" in body      # examples are inlined, not fetched
+
+
+@pytest.mark.java
+def test_the_landing_page_declares_a_csp(client):
+    csp = client.get("/").headers.get("content-security-policy", "")
+    assert "default-src 'none'" in csp
+    assert "connect-src 'self'" in csp     # the page may only call this origin
+    assert "form-action 'none'" in csp
+
+
+@pytest.mark.java
+def test_serving_the_page_adds_no_file_reading_route(client):
+    """The page is one string read at startup. Nothing takes a path."""
+    for probe in ("/index.html", "/static/index.html", "/../etc/passwd",
+                  "/static/../../../../etc/passwd"):
+        assert client.get(probe).status_code == 404, probe
+
+
+@pytest.mark.java
+def test_the_page_is_still_gated_when_a_key_is_configured(monkeypatch):
+    """A landing page must not become an unauthenticated hole in a keyed
+    deployment -- but it also should not be pointless there, so it is exempt
+    only if the whole service is open."""
+    from tlakit.serve.app import KEY_ENV, create_app
+
+    monkeypatch.setenv(KEY_ENV, "s3cret")
+    guarded = TestClient(create_app())
+    # The page is public by design; the API behind it is not.
+    assert guarded.get("/").status_code == 200
+    assert guarded.post("/check", json={"spec": SPEC}).status_code == 401

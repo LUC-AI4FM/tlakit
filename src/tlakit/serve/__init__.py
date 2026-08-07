@@ -85,6 +85,17 @@ def public_runner() -> CliRunner:
 def startup_checks(runner: CliRunner) -> None:
     """Refuse to serve unless the isolation property holds."""
     assert_isolated(runner.tools_jar)
+    # An unreadable jar fails every request with a bare "exit code 1" from
+    # java's ClassNotFoundException. Catch it once, at startup, with a message
+    # that names the file.
+    try:
+        with open(runner.tools_jar, "rb") as handle:
+            handle.read(4)
+    except OSError as exc:
+        raise RuntimeError(
+            f"Cannot read {runner.tools_jar}: {exc}. java would fail with "
+            "ClassNotFoundException: tlc2.TLC on every request."
+        ) from exc
     if runner.community_jar is not None:
         raise RuntimeError(
             "CommunityModules is on the classpath. It provides IOUtils!IOExec, "

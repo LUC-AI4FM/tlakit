@@ -290,3 +290,33 @@ def test_an_unreadable_key_file_locks_everything_out(monkeypatch, tmp_path):
         with pytest.raises(HTTPException) as exc:
             require_key(attempt)
         assert exc.value.status_code == 401
+
+
+def test_startup_refuses_an_unreadable_jar(tmp_path):
+    """An unreadable jar makes java fail with ClassNotFoundException, which
+    reaches the client as a bare 'exit code 1'. Catch it once, at startup."""
+    jar = tmp_path / "tla2tools.jar"
+    jar.write_bytes(b"x")
+    jar.chmod(0o000)
+
+    class Fake:
+        tools_jar = jar
+        community_jar = None
+
+    try:
+        with pytest.raises(RuntimeError, match="Cannot read"):
+            startup_checks(Fake())
+    finally:
+        jar.chmod(0o644)
+
+
+def test_startup_accepts_a_readable_isolated_jar(tmp_path):
+    jar = tmp_path / "tla2tools.jar"
+    jar.write_bytes(b"x")
+    jar.chmod(0o644)
+
+    class Fake:
+        tools_jar = jar
+        community_jar = None
+
+    startup_checks(Fake())

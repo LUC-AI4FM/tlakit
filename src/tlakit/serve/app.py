@@ -11,6 +11,7 @@ All the decisions live in `tlakit.serve`; this file only routes.
 
 import asyncio
 import hmac
+import logging
 import os
 import pathlib
 from typing import Any, Dict, List, Optional
@@ -19,6 +20,7 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from ..api import build_config, module_name_of
+from ..result import Outcome
 from ..cli import CliRunner
 from . import Limits, RequestTooLarge, as_json, clamp_timeout, startup_checks, validate
 
@@ -26,6 +28,8 @@ from . import Limits, RequestTooLarge, as_json, clamp_timeout, startup_checks, v
 #: When set, every request must present this value in X-Tlakit-Key. The edge
 #: Worker supplies it, so learning the tunnel hostname is not enough to reach
 #: the service directly.
+log = logging.getLogger("tlakit.serve")
+
 KEY_ENV = "TLAKIT_SERVE_KEY"
 #: Preferred over KEY_ENV under launchd: a plist is world-readable, so the
 #: secret lives in a mode-640 file that only the service's group can read.
@@ -139,6 +143,18 @@ def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = No
                 timeout=clamp_timeout(payload.timeout, limits),
                 extra_opts=["-coverage", "1"] if payload.coverage else [],
                 heap=limits.heap,
+            )
+        if result.outcome is Outcome.ERROR:
+            # Responses omit raw on purpose, so without this an unexpected
+            # failure is invisible from both sides. This is how
+            # "Could not find or load main class tlc2.TLC" -- an unreadable jar
+            # -- surfaced as nothing but "exited with code 1".
+            log.error(
+                "unexpected TLC failure: exit=%s argv=%s stderr=%s stdout=%s",
+                result.raw.exit_code,
+                result.raw.argv,
+                result.raw.stderr[:2000],
+                result.raw.stdout[:2000],
             )
         return as_json(result, limits)
 

@@ -226,8 +226,14 @@ class Trace:
             keys &= set(self.declared)
         return frozenset(k for k in keys if before.get(k) != after.get(k))
 
-    def to_dataframe(self):
-        """One row per state, one column per variable, plus `step`/`action`."""
+    def to_dataframe(self, flatten: bool = False):
+        """One row per state, one column per variable, plus `step`/`action`.
+
+        With `flatten`, nested TLA+ records expand into dotted columns
+        (`progress.s1.term`). Unflattened columns hold Python dicts, which
+        pandas cannot group, filter, or plot -- and nested records are the
+        common case in real specs, not the exotic one.
+        """
         import pandas as pd  # lazy: pandas is not a hard dependency
 
         rows = []
@@ -236,9 +242,29 @@ class Trace:
                 "step": i + 1,
                 "action": self.actions[i - 1].name if i else "<initial>",
             }
-            row.update(state)
+            row.update(flatten_state(state) if flatten else state)
             rows.append(row)
         return pd.DataFrame(rows)
+
+
+def flatten_state(state: dict[str, Any], separator: str = ".") -> dict[str, Any]:
+    """Expand nested records into dotted keys.
+
+    Sequences and sets are left whole: a tuple is a value, not a namespace, and
+    exploding it would make the column set depend on the state.
+    """
+    flat: dict[str, Any] = {}
+
+    def walk(prefix: str, value: Any) -> None:
+        if isinstance(value, dict) and value:
+            for key, inner in value.items():
+                walk(f"{prefix}{separator}{key}" if prefix else str(key), inner)
+        else:
+            flat[prefix] = value
+
+    for key, value in state.items():
+        walk(str(key), value)
+    return flat
 
 
 @dataclass(frozen=True)

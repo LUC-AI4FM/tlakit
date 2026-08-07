@@ -26,7 +26,12 @@ class JavaNotFound(FileNotFoundError):
     """Raised when no `java` executable can be located."""
 
 
-def _java() -> str:
+def java_executable() -> str:
+    """Path to the `java` binary the TLA+ tools should run under.
+
+    Honours TLAKIT_JAVA, then PATH. Raises rather than letting the failure
+    surface later as a ClassNotFoundException.
+    """
     java = os.environ.get("TLAKIT_JAVA") or shutil.which("java")
     if java is None:
         raise JavaNotFound(
@@ -34,6 +39,10 @@ def _java() -> str:
             "(for example `brew install temurin`) or set TLAKIT_JAVA to its path."
         )
     return java
+
+
+#: Retained for internal call sites.
+_java = java_executable
 
 
 class CliRunner:

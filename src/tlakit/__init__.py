@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from . import api, jar
 from .api import Spec, build_config, check_source, default_runner, load
-from .cli import CliRunner, JavaNotFound
+from .cli import CliRunner, JavaNotFound, java_executable
 from .jar import JarNotFound
 from .result import (
     Action,
@@ -36,6 +36,7 @@ __all__ = [
     "check_source",
     "default_runner",
     "jar",
+    "java_executable",
     "load",
 ]
 

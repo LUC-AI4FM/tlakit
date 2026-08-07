@@ -115,3 +115,19 @@ def test_runs_are_isolated_from_each_other(runner):
             runner.check(SPIKE, "Spike", SPIKE_CFG).outcome
             is Outcome.INVARIANT_VIOLATION
         )
+
+
+def test_java_executable_honours_the_env_override(monkeypatch):
+    from tlakit.cli import java_executable
+
+    monkeypatch.setenv("TLAKIT_JAVA", "/opt/custom/bin/java")
+    assert java_executable() == "/opt/custom/bin/java"
+
+
+def test_java_executable_error_names_the_env_var(monkeypatch):
+    import tlakit.cli as cli
+
+    monkeypatch.delenv("TLAKIT_JAVA", raising=False)
+    monkeypatch.setattr(cli.shutil, "which", lambda _: None)
+    with pytest.raises(cli.JavaNotFound, match="TLAKIT_JAVA"):
+        cli.java_executable()

@@ -46,7 +46,7 @@ implementation plan.
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.10+
 - Java (for `tla2tools.jar`)
 
 Point tlakit at the TLA+ tools with `TLAKIT_TLA2TOOLS=/path/to/tla2tools.jar`.

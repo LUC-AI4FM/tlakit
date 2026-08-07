@@ -62,11 +62,47 @@ def test_text_beats_exit_code():
 
 
 def test_unknown_nonzero_exit_is_error():
-    outcome, diags, _ = parse_tlc("TLC2 Version 1\nsomething odd\n", 77)
+    outcome, diags, _ = parse_tlc("TLC2 Version 1\nsomething odd\n", 42)
     assert outcome is Outcome.ERROR
-    assert any("77" in d.message for d in diags)
+    assert any("42" in d.message for d in diags)
+
+
+def test_documented_exit_codes_map_to_their_own_outcomes():
+    """Read from tlc2.output.EC$ExitStatus, not inferred."""
+    cases = {
+        10: Outcome.ASSUMPTION_VIOLATION,
+        14: Outcome.ASSERTION_FAILED,
+        75: Outcome.EVALUATION_ERROR,
+        76: Outcome.EVALUATION_ERROR,
+        77: Outcome.EVALUATION_ERROR,
+        150: Outcome.PARSE_ERROR,
+        151: Outcome.CONFIG_ERROR,
+        152: Outcome.STATE_SPACE_TOO_LARGE,
+        153: Outcome.ERROR,
+        255: Outcome.ERROR,
+    }
+    for code, expected in cases.items():
+        outcome, _, _ = parse_tlc("TLC2 Version 1\n", code)
+        assert outcome is expected, f"exit {code}"
 
 
 def test_temporal_violation_by_exit_code():
     outcome, _, _ = parse_tlc("TLC2 Version 1\n", 13)
     assert outcome is Outcome.TEMPORAL_VIOLATION
+
+
+def test_old_tlc_without_dumptrace_gets_an_actionable_diagnostic():
+    """v1.7.4 (TLC 2.19) has no -dumpTrace, which tlakit passes on every run.
+    Without this the user sees Outcome.ERROR and exit code 1, which is not even
+    in TLC's own exit table."""
+    stdout = (
+        "TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)\n"
+        "Error: Error: unrecognized option: -dumpTrace\n"
+        "Usage: java tlc2.TLC [-option] inputfile\n"
+    )
+    outcome, diags, _ = parse_tlc(stdout, 1)
+    assert outcome is Outcome.ERROR
+    message = " ".join(d.message for d in diags)
+    assert "-dumpTrace" in message
+    assert "v1.8.0" in message
+    assert "TLC2 Version 2.19" in message

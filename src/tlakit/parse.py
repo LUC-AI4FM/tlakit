@@ -40,16 +40,37 @@ _TLC_TEMPORAL = re.compile(r"^Error: (Temporal properties were violated\.)$", re
 # ``Back to state 1: <Next line 5, col 9 to line 5, col 24 of module L>``
 # TLC reports the cycle only in its text output; the JSON dump has no marker.
 _TLC_BACK_TO_STATE = re.compile(r"^Back to state (\d+)\b", re.M)
+# ``Error: Error: unrecognized option: -dumpTrace`` from a TLC too old to have
+# it. tlakit passes -dumpTrace on every run, so an old jar fails every check
+# with an exit code that is not even in TLC's own table.
+_TLC_UNRECOGNIZED = re.compile(r"unrecognized option: (\S+)")
+_TLC_VERSION = re.compile(r"^(TLC2 Version \S+)", re.M)
 
 # Verified 2026-08-07. Note that SANY exits 0 even when it reports semantic
 # errors, so exit codes are never the sole signal — see `parse_tlc` and
 # `CliRunner.parse`.
-_EXIT_OUTCOME = {
-    0: Outcome.OK,
-    11: Outcome.DEADLOCK,
-    12: Outcome.INVARIANT_VIOLATION,
-    13: Outcome.TEMPORAL_VIOLATION,
+#: TLC's exit codes, transcribed from `tlc2.output.EC$ExitStatus` in
+#: tla2tools.jar via `javap -constants`. Read rather than inferred: the four
+#: codes originally measured by hand were a sixth of the real table.
+EXIT_OUTCOME = {
+    0: Outcome.OK,                                # SUCCESS
+    10: Outcome.ASSUMPTION_VIOLATION,             # VIOLATION_ASSUMPTION
+    11: Outcome.DEADLOCK,                         # VIOLATION_DEADLOCK
+    12: Outcome.INVARIANT_VIOLATION,              # VIOLATION_SAFETY
+    13: Outcome.TEMPORAL_VIOLATION,               # VIOLATION_LIVENESS
+    14: Outcome.ASSERTION_FAILED,                 # VIOLATION_ASSERT
+    75: Outcome.EVALUATION_ERROR,                 # FAILURE_SPEC_EVAL
+    76: Outcome.EVALUATION_ERROR,                 # FAILURE_SAFETY_EVAL
+    77: Outcome.EVALUATION_ERROR,                 # FAILURE_LIVENESS_EVAL
+    150: Outcome.PARSE_ERROR,                     # ERROR_SPEC_PARSE
+    151: Outcome.CONFIG_ERROR,                    # ERROR_CONFIG_PARSE
+    152: Outcome.STATE_SPACE_TOO_LARGE,           # ERROR_STATESPACE_TOO_LARGE
+    153: Outcome.ERROR,                           # ERROR_SYSTEM
+    255: Outcome.ERROR,                           # ERROR
 }
+
+#: Retained for internal call sites.
+_EXIT_OUTCOME = EXIT_OUTCOME
 
 
 def parse_sany(stdout: str) -> list[Diagnostic]:
@@ -114,6 +135,20 @@ def parse_tlc(
     if sany_diags:
         diags = sany_diags + diags
         outcome = outcome or Outcome.PARSE_ERROR
+
+    if m := _TLC_UNRECOGNIZED.search(stdout):
+        option = m.group(1)
+        version = _TLC_VERSION.search(stdout)
+        running = f" This jar reports {version.group(1)}." if version else ""
+        diags.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"This TLC does not support {option}, which tlakit requires."
+                f"{running} Upgrade to TLA+ tools v1.8.0 or newer, or point "
+                "TLAKIT_TLA2TOOLS at a newer tla2tools.jar.",
+            )
+        )
+        return Outcome.ERROR, diags, _parse_stats(stdout)
 
     if outcome is None:
         outcome = _EXIT_OUTCOME.get(exit_code, Outcome.ERROR)

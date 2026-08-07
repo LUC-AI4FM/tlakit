@@ -37,6 +37,9 @@ _TLC_SECONDS = re.compile(r"Finished in (\d+)s ")
 _TLC_INVARIANT = re.compile(r"^Error: (Invariant .* is violated\.)$", re.M)
 _TLC_DEADLOCK = re.compile(r"^Error: (Deadlock reached\.)$", re.M)
 _TLC_TEMPORAL = re.compile(r"^Error: (Temporal properties were violated\.)$", re.M)
+# ``Back to state 1: <Next line 5, col 9 to line 5, col 24 of module L>``
+# TLC reports the cycle only in its text output; the JSON dump has no marker.
+_TLC_BACK_TO_STATE = re.compile(r"^Back to state (\d+)\b", re.M)
 
 # Verified 2026-08-07. Note that SANY exits 0 even when it reports semantic
 # errors, so exit codes are never the sole signal — see `parse_tlc` and
@@ -123,3 +126,15 @@ def parse_tlc(
             )
 
     return outcome, diags, _parse_stats(stdout)
+
+
+def parse_loop_start(stdout: str) -> int | None:
+    """Zero-based index of the state a lasso counterexample returns to.
+
+    TLC prints `Back to state N` (one-based) in its text output only -- the
+    `-dumpTrace json` file carries no loop marker, verified 2026-08-07.
+    """
+    match = _TLC_BACK_TO_STATE.search(stdout)
+    if match is None:
+        return None
+    return max(int(match.group(1)) - 1, 0)

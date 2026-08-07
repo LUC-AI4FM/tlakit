@@ -25,6 +25,8 @@ _CSS = """
               margin-top: 6px; }
 .tlakit-hit { background: rgba(210,60,60,.22); display: block; }
 .tlakit-stats { opacity: .7; margin-top: 6px; }
+.tlakit-loop td, .tlakit-loop th { border-top: 2px solid rgba(120,90,220,.85); }
+.tlakit-loopnote { opacity: .8; margin-top: 4px; font-style: italic; }
 </style>
 """
 
@@ -93,10 +95,19 @@ def _trace_html(result: CheckResult) -> str:
             value = escape(repr(state.get(name)))
             css = ' class="tlakit-changed"' if name in changed else ""
             cells.append(f"<td{css}>{value}</td>")
+        css = ' class="tlakit-loop"' if index == trace.loop_start else ""
         rows.append(
-            f"<tr><td>{index + 1}</td><td>{action}</td>" + "".join(cells) + "</tr>"
+            f"<tr{css}><td>{index + 1}</td><td>{action}</td>"
+            + "".join(cells)
+            + "</tr>"
         )
-    return "<table>" + "".join(rows) + "</table>"
+    table = "<table>" + "".join(rows) + "</table>"
+    if trace.is_lasso:
+        table += (
+            '<div class="tlakit-loopnote">Lasso: the behaviour repeats from '
+            f"step {trace.loop_start + 1} onwards.</div>"
+        )
+    return table
 
 
 def result_html(result: CheckResult, source: str | None = None) -> str:

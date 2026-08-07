@@ -131,3 +131,61 @@ def test_java_executable_error_names_the_env_var(monkeypatch):
     monkeypatch.setattr(cli.shutil, "which", lambda _: None)
     with pytest.raises(cli.JavaNotFound, match="TLAKIT_JAVA"):
         cli.java_executable()
+
+
+# --- issue #10: interrupting a cell must not orphan the JVM ---------------
+
+
+def test_terminate_kills_a_running_process():
+    import subprocess as sp
+    import time
+
+    from tlakit.cli import _terminate
+
+    proc = sp.Popen(
+        ["sleep", "60"], stdout=sp.PIPE, stderr=sp.PIPE, text=True,
+        start_new_session=True,
+    )
+    _terminate(proc)
+    deadline = time.time() + 5
+    while proc.poll() is None and time.time() < deadline:
+        time.sleep(0.05)
+    assert proc.poll() is not None, "process survived _terminate"
+
+
+def test_terminate_is_safe_on_an_already_dead_process():
+    import subprocess as sp
+
+    from tlakit.cli import _terminate
+
+    proc = sp.Popen(["true"], stdout=sp.PIPE, stderr=sp.PIPE, text=True,
+                    start_new_session=True)
+    proc.wait()
+    _terminate(proc)  # must not raise
+
+
+def test_keyboard_interrupt_kills_the_child_and_propagates(runner, monkeypatch):
+    """The notebook interrupt path: KeyboardInterrupt must re-raise, but only
+    after the JVM is gone."""
+    import subprocess as sp
+
+    killed = {}
+    real_terminate = __import__("tlakit.cli", fromlist=["_terminate"])._terminate
+
+    def spy(proc):
+        killed["pid"] = proc.pid
+        return real_terminate(proc)
+
+    monkeypatch.setattr("tlakit.cli._terminate", spy)
+
+    original = sp.Popen.communicate
+
+    def interrupt(self, *a, **kw):
+        sp.Popen.communicate = original
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(sp.Popen, "communicate", interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        runner.check(OK, "Ok", OK_CFG)
+    assert "pid" in killed, "_terminate was not called on interrupt"

@@ -12,10 +12,11 @@ import shutil
 import signal
 import subprocess
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 from .jar import find_community_jar, find_tools_jar
-from .parse import parse_sany, parse_tlc
+from .parse import parse_loop_start, parse_sany, parse_tlc
 from .result import CheckResult, Diagnostic, Outcome, RawOutput, Severity, Stats
 from .source import declared_variables
 from .trace import load_trace
@@ -44,6 +45,24 @@ def java_executable() -> str:
 
 #: Retained for internal call sites.
 _java = java_executable
+
+
+def _terminate(proc: subprocess.Popen) -> tuple[str, str]:
+    """Kill a tool process and everything it spawned, then drain its pipes.
+
+    `start_new_session=True` put the JVM in its own process group, so the whole
+    group goes at once. A stranded TLC will otherwise keep eating the machine.
+    """
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, AttributeError, OSError):
+        # No process groups on this platform, or the child is already gone.
+        proc.kill()
+    try:
+        return proc.communicate()
+    except ValueError:
+        # Pipes already closed by an earlier drain.
+        return "", ""
 
 
 class CliRunner:
@@ -79,14 +98,13 @@ class CliRunner:
             stdout, stderr = proc.communicate(timeout=timeout)
             return RawOutput(argv, proc.returncode, stdout, stderr), False
         except subprocess.TimeoutExpired:
-            # start_new_session put the JVM in its own process group; kill the
-            # whole group, otherwise a stranded TLC keeps eating the machine.
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                proc.kill()
-            stdout, stderr = proc.communicate()
+            stdout, stderr = _terminate(proc)
             return RawOutput(argv, None, stdout, stderr), True
+        except BaseException:
+            # Interrupting a notebook cell raises here. Without this the JVM
+            # survives the cell, invisible and holding gigabytes.
+            _terminate(proc)
+            raise
 
     def parse(self, source: str, module: str) -> CheckResult:
         """Syntax- and level-check a module with SANY."""
@@ -147,6 +165,9 @@ class CliRunner:
             ]
             raw, timed_out = self._run(argv, work, timeout)
             trace = load_trace(work / TRACE_FILE, declared_variables(source))
+
+        if trace is not None:
+            trace = replace(trace, loop_start=parse_loop_start(raw.stdout))
 
         if timed_out:
             _, diagnostics, stats = parse_tlc(raw.stdout, None)

@@ -72,6 +72,9 @@ class Trace:
     #: The module's declared VARIABLES, when known. Everything else in a state
     #: came from an ALIAS. Empty means "treat every key as a variable".
     declared: list[str] = field(default_factory=list)
+    #: Index of the state the behaviour loops back to, for a lasso
+    #: counterexample. None for a finite trace.
+    loop_start: int | None = None
 
     def __post_init__(self) -> None:
         if self.states and len(self.actions) != len(self.states) - 1:
@@ -89,6 +92,25 @@ class Trace:
 
     def __iter__(self):
         return iter(self.states)
+
+    @property
+    def is_lasso(self) -> bool:
+        """True when the behaviour ends by cycling rather than stopping."""
+        return self.loop_start is not None
+
+    @property
+    def loop(self) -> list[dict[str, Any]]:
+        """The repeating suffix. Empty for a finite trace."""
+        if self.loop_start is None:
+            return []
+        return self.states[self.loop_start:]
+
+    @property
+    def prefix(self) -> list[dict[str, Any]]:
+        """The states before the cycle begins. The whole trace if finite."""
+        if self.loop_start is None:
+            return list(self.states)
+        return self.states[: self.loop_start]
 
     def _keys(self) -> set[str]:
         return {key for state in self.states for key in state}

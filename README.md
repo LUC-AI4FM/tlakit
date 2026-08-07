@@ -1,0 +1,57 @@
+# tlakit
+
+A Python and notebook client for the TLA+ toolchain.
+
+TLA+ has good tools — TLC, SANY, the TLA+ Debugger, the animation modules. None
+of them are reachable from Python, and none of them compose with a notebook.
+tlakit is the missing client. It does not reimplement any of them.
+
+```python
+import tlakit
+
+spec = tlakit.load("Microwave.tla")
+result = spec.check(invariants=["Safety"])
+
+if not result.ok:
+    print(result.outcome)                 # Outcome.INVARIANT_VIOLATION
+    print(result.trace.delta(3))          # frozenset({'radiation'})
+    df = result.trace.to_dataframe()      # counterexample as a DataFrame
+```
+
+In a notebook:
+
+```
+%load_ext tlakit
+```
+
+```
+%%tla Microwave
+---- MODULE Microwave ----
+...
+====
+```
+
+```
+%%tlc Microwave
+SPECIFICATION Spec
+INVARIANT Safety
+```
+
+## Status
+
+Early. M1 (core runner, results, `%%tla` / `%%tlc`) is in progress. See
+`docs/superpowers/specs/` for the design and `docs/superpowers/plans/` for the
+implementation plan.
+
+## Requirements
+
+- Python 3.11+
+- Java (for `tla2tools.jar`)
+
+Point tlakit at the TLA+ tools with `TLAKIT_TLA2TOOLS=/path/to/tla2tools.jar`.
+`TLAKIT_COMMUNITY_MODULES` optionally locates `CommunityModules-deps.jar`, which
+`SVG.tla` and `Json.tla` need.
+
+## License
+
+MIT

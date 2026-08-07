@@ -57,9 +57,18 @@ def _stats_html(result: CheckResult) -> str:
         bits.append(f"depth {s.depth}")
     if s.duration_ms is not None:
         bits.append(f"{s.duration_ms} ms")
-    if not bits:
-        return ""
-    return f'<div class="tlakit-stats">{escape(", ".join(bits))}</div>'
+    out = ""
+    if bits:
+        out = f'<div class="tlakit-stats">{escape(", ".join(bits))}</div>'
+    unused = result.stats.unused_actions
+    if unused:
+        names = escape(", ".join(unused))
+        out += (
+            '<div class="tlakit-banner tlakit-bad">Never enabled: '
+            f"{names}. An action that never fires means the specification may "
+            "be passing for the wrong reason.</div>"
+        )
+    return out
 
 
 def _diagnostics_html(result: CheckResult) -> str:

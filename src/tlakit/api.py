@@ -121,6 +121,7 @@ class Spec:
         invariants: list[str] | None = None,
         properties: list[str] | None = None,
         timeout: float | None = None,
+        coverage: bool = False,
         extra_opts: list[str] | None = None,
     ) -> CheckResult:
         """Model-check with TLC.
@@ -137,8 +138,12 @@ class Spec:
                 invariants=invariants,
                 properties=properties,
             )
+        options = list(extra_opts or [])
+        if coverage and "-coverage" not in options:
+            # TLC gathers no coverage unless asked, and it is not free.
+            options += ["-coverage", "1"]
         return self._runner().check(
-            self.source, self.name, config, timeout=timeout, extra_opts=extra_opts
+            self.source, self.name, config, timeout=timeout, extra_opts=options
         )
 
 

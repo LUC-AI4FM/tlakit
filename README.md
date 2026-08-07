@@ -20,7 +20,37 @@ if not result.ok:
     df = result.trace.to_dataframe()      # counterexample as a DataFrame
 ```
 
-In a notebook:
+## As a Jupyter kernel
+
+```bash
+pip install "tlakit[kernel]"
+python -m tlakit.kernel.install
+```
+
+Then pick **TLA⁺ (tlakit)** from Jupyter's kernel list and write TLA+ directly —
+no magics, no Python wrapper:
+
+```tla
+---- MODULE Microwave ----
+EXTENDS Naturals
+VARIABLES door, radiation
+...
+====
+```
+
+```
+SPECIFICATION Spec
+INVARIANT Safety
+```
+
+Python still works in the same notebook, which is the point of building on
+IPython rather than replacing it:
+
+```python
+result.trace.to_dataframe()
+```
+
+## Or as magics in an ordinary Python kernel
 
 ```
 %load_ext tlakit

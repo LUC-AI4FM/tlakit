@@ -12,12 +12,23 @@ from typing import Any
 
 
 class Outcome(str, Enum):
+    """How a run ended.
+
+    Names follow `tlc2.output.EC$ExitStatus`, read from tla2tools.jar rather
+    than guessed. See `tlakit.parse.EXIT_OUTCOME`.
+    """
+
     OK = "ok"
-    INVARIANT_VIOLATION = "invariant_violation"
-    DEADLOCK = "deadlock"
-    TEMPORAL_VIOLATION = "temporal_violation"
-    PARSE_ERROR = "parse_error"
-    TIMEOUT = "timeout"
+    INVARIANT_VIOLATION = "invariant_violation"      # VIOLATION_SAFETY
+    DEADLOCK = "deadlock"                            # VIOLATION_DEADLOCK
+    TEMPORAL_VIOLATION = "temporal_violation"        # VIOLATION_LIVENESS
+    ASSUMPTION_VIOLATION = "assumption_violation"    # VIOLATION_ASSUMPTION
+    ASSERTION_FAILED = "assertion_failed"            # VIOLATION_ASSERT
+    EVALUATION_ERROR = "evaluation_error"            # FAILURE_*_EVAL
+    PARSE_ERROR = "parse_error"                      # ERROR_SPEC_PARSE
+    CONFIG_ERROR = "config_error"                    # ERROR_CONFIG_PARSE
+    STATE_SPACE_TOO_LARGE = "state_space_too_large"  # ERROR_STATESPACE_TOO_LARGE
+    TIMEOUT = "timeout"                              # tlakit, not TLC
     ERROR = "error"
 
 

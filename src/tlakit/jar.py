@@ -32,7 +32,12 @@ def _candidates(explicit: Path | None, env_var: str, filename: str) -> list[Path
     from_env = os.environ.get(env_var)
     if from_env:
         found.append(Path(from_env))
-    found.append(cache_dir() / filename)
+    # Cached jars live under a version directory so a new pin never overwrites
+    # an older one; newest tag wins when several are present.
+    root = cache_dir()
+    if root.is_dir():
+        found.extend(sorted(root.glob(f"*/{filename}"), reverse=True))
+    found.append(root / filename)
     return found
 
 
@@ -44,8 +49,10 @@ def find_tools_jar(explicit: Path | None = None) -> Path:
     raise JarNotFound(
         f"Could not find {TOOLS_JAR}. Looked in: "
         + ", ".join(str(p) for p in tried)
-        + f". Set the {ENV_TOOLS} environment variable to its location, or pass "
-        "an explicit path."
+        + ". Run `python -m tlakit.install` to fetch the pinned release, set "
+        f"the {ENV_TOOLS} environment variable to an existing jar, or pass an "
+        "explicit path. Note that tlakit needs TLA+ tools v1.8.0 or newer: "
+        "v1.7.4 has no -dumpTrace option."
     )
 
 

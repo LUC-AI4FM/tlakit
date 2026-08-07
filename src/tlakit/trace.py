@@ -43,8 +43,15 @@ def _unwrap(data: dict[str, Any]) -> dict[str, Any]:
     return data if ("state" in data or "action" in data) else {}
 
 
-def trace_from_json(data: dict[str, Any]) -> Trace:
-    """Build a Trace from TLC's JSON, wrapped or not."""
+def trace_from_json(
+    data: dict[str, Any], declared: list[str] | None = None
+) -> Trace:
+    """Build a Trace from TLC's JSON, wrapped or not.
+
+    `declared` is the module's VARIABLES; pass it so alias fields can be told
+    apart from state. TLC's own `vars` key cannot do this — under an ALIAS it
+    holds the alias-expanded record.
+    """
     counterexample = _unwrap(data)
 
     action_by_destination: dict[Any, Action] = {}
@@ -70,13 +77,18 @@ def trace_from_json(data: dict[str, Any]) -> Trace:
         action_by_destination.get(state_id, Action(name=UNKNOWN_ACTION))
         for state_id in state_ids[1:]
     ]
-    return Trace(states=states, actions=actions, state_ids=state_ids)
+    return Trace(
+        states=states,
+        actions=actions,
+        state_ids=state_ids,
+        declared=list(declared or []),
+    )
 
 
-def load_trace(path: Path) -> Trace | None:
+def load_trace(path: Path, declared: list[str] | None = None) -> Trace | None:
     """Return the trace, or None when TLC wrote no counterexample."""
     path = Path(path)
     if not path.is_file():
         return None
-    trace = trace_from_json(json.loads(path.read_text()))
+    trace = trace_from_json(json.loads(path.read_text()), declared=declared)
     return trace if trace.states else None

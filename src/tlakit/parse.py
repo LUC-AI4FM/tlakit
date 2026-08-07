@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from .result import Diagnostic, Outcome, Severity, Stats
+from .result import Coverage, Diagnostic, Outcome, Severity, Stats
 
 # ``Encountered "====" at line 4, column 1 and token "="``
 _SANY_PARSE = re.compile(r"^(Encountered .*? at line (\d+), column (\d+).*)$", re.M)
@@ -45,6 +45,16 @@ _TLC_BACK_TO_STATE = re.compile(r"^Back to state (\d+)\b", re.M)
 # with an exit code that is not even in TLC's own table.
 _TLC_UNRECOGNIZED = re.compile(r"unrecognized option: (\S+)")
 _TLC_VERSION = re.compile(r"^(TLC2 Version \S+)", re.M)
+
+# ``<Bump line 5, col 1 to line 5, col 4 of module C>: 3:9``
+# Only unindented entries carrying a distinct:total pair are actions. Indented
+# lines are sub-expression coverage, an entry with a single number is a
+# variable, and an entry with no number at all is an invariant.
+_TLC_COVERAGE = re.compile(
+    r"^<(\w+) line (\d+), col \d+ to line \d+, col \d+ of module (\w+)>: "
+    r"(\d+):(\d+)$",
+    re.M,
+)
 
 # Verified 2026-08-07. Note that SANY exits 0 even when it reports semantic
 # errors, so exit codes are never the sole signal — see `parse_tlc` and
@@ -95,6 +105,17 @@ def parse_sany(stdout: str) -> list[Diagnostic]:
     return diags
 
 
+def parse_coverage(stdout: str) -> dict[str, Coverage]:
+    """Per-action coverage, when the run was given `-coverage`."""
+    found: dict[str, Coverage] = {}
+    for name, line, module, distinct, total in _TLC_COVERAGE.findall(stdout):
+        found[name] = Coverage(
+            name=name, distinct=int(distinct), total=int(total),
+            module=module, line=int(line),
+        )
+    return found
+
+
 def _parse_stats(stdout: str) -> Stats:
     generated = distinct = queue_left = depth = duration = None
     if m := _TLC_STATS.search(stdout):
@@ -111,6 +132,7 @@ def _parse_stats(stdout: str) -> Stats:
         queue_left=queue_left,
         depth=depth,
         duration_ms=duration,
+        coverage=parse_coverage(stdout),
     )
 
 

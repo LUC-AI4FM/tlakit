@@ -55,12 +55,42 @@ class Diagnostic:
 
 
 @dataclass(frozen=True)
+class Coverage:
+    """How often TLC evaluated one action.
+
+    `distinct` counts states the action generated that were new; `total` counts
+    every generation. `total == 0` means the action never fired -- usually a
+    guard that can never hold, which is how a specification passes for the
+    wrong reason.
+    """
+
+    name: str
+    distinct: int
+    total: int
+    module: str | None = None
+    line: int | None = None
+
+    @property
+    def unused(self) -> bool:
+        return self.total == 0
+
+
+@dataclass(frozen=True)
 class Stats:
     generated: int | None = None
     distinct: int | None = None
     queue_left: int | None = None
     depth: int | None = None
     duration_ms: int | None = None
+    #: Per-action coverage, keyed by action name. Populated only when the run
+    #: asked for it -- TLC gathers none by default, so empty means "not
+    #: measured", never "nothing ran".
+    coverage: dict[str, "Coverage"] = field(default_factory=dict)
+
+    @property
+    def unused_actions(self) -> list[str]:
+        """Actions TLC never fired. Empty when coverage was not requested."""
+        return sorted(name for name, c in self.coverage.items() if c.unused)
 
 
 @dataclass(frozen=True)

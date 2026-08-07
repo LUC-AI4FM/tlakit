@@ -46,16 +46,6 @@ _TLC_BACK_TO_STATE = re.compile(r"^Back to state (\d+)\b", re.M)
 _TLC_UNRECOGNIZED = re.compile(r"unrecognized option: (\S+)")
 _TLC_VERSION = re.compile(r"^(TLC2 Version \S+)", re.M)
 
-# ``<Bump line 5, col 1 to line 5, col 4 of module C>: 3:9``
-# Only unindented entries carrying a distinct:total pair are actions. Indented
-# lines are sub-expression coverage, an entry with a single number is a
-# variable, and an entry with no number at all is an invariant.
-_TLC_COVERAGE = re.compile(
-    r"^<(\w+) line (\d+), col \d+ to line \d+, col \d+ of module (\w+)>: "
-    r"(\d+):(\d+)$",
-    re.M,
-)
-
 # Verified 2026-08-07. Note that SANY exits 0 even when it reports semantic
 # errors, so exit codes are never the sole signal — see `parse_tlc` and
 # `CliRunner.parse`.

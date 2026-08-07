@@ -15,9 +15,18 @@ spec = tlakit.load("Microwave.tla")
 result = spec.check(invariants=["Safety"])
 
 if not result.ok:
-    print(result.outcome)                 # Outcome.INVARIANT_VIOLATION
-    print(result.trace.delta(3))          # frozenset({'radiation'})
-    df = result.trace.to_dataframe()      # counterexample as a DataFrame
+    print(result.outcome)                       # Outcome.INVARIANT_VIOLATION
+    print(result.trace.delta(3))                # frozenset({'radiation'})
+    result.trace.to_dataframe(flatten=True)     # nested records as columns
+```
+
+Sweep a constant and get the smallest configuration that breaks:
+
+```python
+sweep = spec.sweep({"Servers": [3, 4, 5]}, invariants=["Inv"],
+                   workers=3, heap="2G")
+sweep.first_failure().constants     # {'Servers': 4}
+sweep.to_dataframe()                # one row per configuration
 ```
 
 ## As a Jupyter kernel

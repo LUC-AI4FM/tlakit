@@ -103,3 +103,41 @@ def test_compare_reports_before_and_after_for_differing_variables():
 def test_compare_of_identical_states_is_empty():
     t = trace_from_json(NESTED)
     assert t.compare(0, 0) == {}
+
+
+def test_actions_are_keyed_by_destination_state_id_not_position():
+    """TLC keys action edges by destination state id. Zipping positionally
+    misattributes actions whenever the edge list is not in state order --
+    which is what a lasso trace with a back edge looks like."""
+    data = {
+        "state": [[1, {"x": 0}], [2, {"x": 1}], [3, {"x": 2}]],
+        "action": [
+            # deliberately out of order
+            [[2, {"x": 1}], {"name": "Second"}, [3, {"x": 2}]],
+            [[1, {"x": 0}], {"name": "First"}, [2, {"x": 1}]],
+        ],
+    }
+    t = trace_from_json(data)
+    assert [a.name for a in t.actions] == ["First", "Second"]
+
+
+def test_state_ids_are_preserved():
+    t = trace_from_json(NESTED)
+    assert t.state_ids == [1, 2, 3]
+
+
+def test_missing_edge_yields_a_placeholder_action():
+    data = {"state": [[1, {"x": 0}], [2, {"x": 1}]], "action": []}
+    t = trace_from_json(data)
+    assert len(t.actions) == 1
+    assert t.actions[0].name == "<unknown>"
+
+
+def test_malformed_entries_are_skipped_not_fatal():
+    data = {
+        "state": [[1, {"x": 0}], "junk", [2, {"x": 1}]],
+        "action": [["short"], [[1, {"x": 0}], {"name": "N"}, [2, {"x": 1}]]],
+    }
+    t = trace_from_json(data)
+    assert len(t) == 2
+    assert t.actions[0].name == "N"

@@ -4,10 +4,12 @@ The shape is TLC's, not ours:
 
     {"vars": [...],
      "counterexample": {
-        "state":  [[n, {vars}], ...],
-        "action": [[[n, {vars}], {"name":..., "location":{...}}, [n2, {vars}]], ...]}}
+        "state":  [[id, {vars}], ...],
+        "action": [[[id, {vars}], {"name":..., "location":{...}}, [id2, {vars}]], ...]}}
 
-This module renames its parts; it does not reinterpret them.
+Action edges are keyed by *destination state id*, not by position, so they are
+resolved by id here rather than zipped. This module renames TLC's parts; it does
+not reinterpret them.
 """
 from __future__ import annotations
 
@@ -17,11 +19,13 @@ from typing import Any
 
 from .result import Action, Trace
 
+UNKNOWN_ACTION = "<unknown>"
+
 
 def _action_from(entry: dict[str, Any]) -> Action:
     loc = entry.get("location") or {}
     return Action(
-        name=entry.get("name", "<unknown>"),
+        name=entry.get("name", UNKNOWN_ACTION),
         module=loc.get("module"),
         begin_line=loc.get("beginLine"),
         begin_column=loc.get("beginColumn"),
@@ -30,19 +34,43 @@ def _action_from(entry: dict[str, Any]) -> Action:
     )
 
 
-def trace_from_json(data: dict[str, Any]) -> Trace:
-    """Build a Trace from TLC's JSON, wrapped or not.
+def _unwrap(data: dict[str, Any]) -> dict[str, Any]:
+    """TLC wraps the trace under `counterexample`; tooling often unwraps it
+    before saving. Accept either rather than silently returning nothing."""
+    inner = data.get("counterexample")
+    if isinstance(inner, dict):
+        return inner
+    return data if ("state" in data or "action" in data) else {}
 
-    TLC writes `{"vars": ..., "counterexample": {"state": ..., "action": ...}}`,
-    but tooling that unwraps it before saving leaves the bare inner object on
-    disk. Accept both rather than silently returning an empty trace.
-    """
-    counterexample = data.get("counterexample")
-    if not isinstance(counterexample, dict):
-        counterexample = data if ("state" in data or "action" in data) else {}
-    states = [state for _, state in counterexample.get("state", [])]
-    actions = [_action_from(edge[1]) for edge in counterexample.get("action", [])]
-    return Trace(states=states, actions=actions)
+
+def trace_from_json(data: dict[str, Any]) -> Trace:
+    """Build a Trace from TLC's JSON, wrapped or not."""
+    counterexample = _unwrap(data)
+
+    action_by_destination: dict[Any, Action] = {}
+    for edge in counterexample.get("action", []):
+        if not isinstance(edge, list) or len(edge) < 3:
+            continue
+        entry, destination = edge[1], edge[2]
+        if not isinstance(entry, dict):
+            continue
+        if not isinstance(destination, list) or not destination:
+            continue
+        action_by_destination[destination[0]] = _action_from(entry)
+
+    state_ids: list[Any] = []
+    states: list[dict[str, Any]] = []
+    for entry in counterexample.get("state", []):
+        if not isinstance(entry, list) or len(entry) < 2:
+            continue
+        state_ids.append(entry[0])
+        states.append(dict(entry[1] or {}))
+
+    actions = [
+        action_by_destination.get(state_id, Action(name=UNKNOWN_ACTION))
+        for state_id in state_ids[1:]
+    ]
+    return Trace(states=states, actions=actions, state_ids=state_ids)
 
 
 def load_trace(path: Path) -> Trace | None:

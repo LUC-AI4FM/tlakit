@@ -66,6 +66,9 @@ class Action:
 class Trace:
     states: list[dict[str, Any]]
     actions: list[Action] = field(default_factory=list)
+    #: TLC's own state identifiers, parallel to `states`. Empty when the trace
+    #: was built by hand rather than loaded from TLC.
+    state_ids: list[Any] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.states and len(self.actions) != len(self.states) - 1:

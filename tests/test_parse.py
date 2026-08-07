@@ -106,3 +106,27 @@ def test_old_tlc_without_dumptrace_gets_an_actionable_diagnostic():
     assert "-dumpTrace" in message
     assert "v1.8.0" in message
     assert "TLC2 Version 2.19" in message
+
+
+def test_a_missing_extends_produces_a_diagnostic():
+    """SANY reports this with no line or column, so it matched none of the
+    existing patterns -- a public client got parse_error and no explanation."""
+    stdout = (
+        "Parsing file /tmp/E.tla\n"
+        "Cannot find source file for module IOUtils imported in module E.\n"
+        "*** Errors: 1\n"
+    )
+    diags = parse_sany(stdout)
+    assert len(diags) == 1
+    assert "IOUtils" in diags[0].message
+    assert diags[0].module == "E"
+
+    outcome, diags, _ = parse_tlc(stdout, 150)
+    assert outcome is Outcome.PARSE_ERROR
+    assert diags, "an outcome of parse_error with no diagnostics tells nobody anything"
+
+
+def test_a_missing_module_without_an_importer_still_reports():
+    diags = parse_sany("Cannot find source file for module Widgets\n")
+    assert len(diags) == 1
+    assert "Widgets" in diags[0].message

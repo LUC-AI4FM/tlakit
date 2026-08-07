@@ -1,11 +1,12 @@
 """tlakit — a Python and notebook client for the TLA+ toolchain."""
 from __future__ import annotations
 
-from . import api, install, jar
+from . import api, install, jar, sweep
 from .api import Spec, build_config, check_source, default_runner, load
 from .cli import CliRunner, JavaNotFound, java_executable
 from .jar import JarNotFound
 from .result import (
+    flatten_state,
     Action,
     CheckResult,
     Diagnostic,
@@ -35,10 +36,12 @@ __all__ = [
     "build_config",
     "check_source",
     "default_runner",
+    "flatten_state",
     "install",
     "jar",
     "java_executable",
     "load",
+    "sweep",
 ]
 
 

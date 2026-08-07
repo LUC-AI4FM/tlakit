@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 from dataclasses import replace
 from pathlib import Path
 
@@ -83,6 +84,22 @@ def _kill_group(proc: subprocess.Popen) -> None:
         proc.kill()
 
 
+#: Every tool process currently running, so an interrupt in one thread can tear
+#: down children started by others. KeyboardInterrupt reaches only the main
+#: thread, so a worker will never notice on its own.
+_LIVE: set[subprocess.Popen] = set()
+_LIVE_LOCK = threading.Lock()
+
+
+def terminate_all() -> int:
+    """Kill every running tool process. Returns how many were signalled."""
+    with _LIVE_LOCK:
+        procs = list(_LIVE)
+    for proc in procs:
+        _kill_group(proc)
+    return len(procs)
+
+
 def _terminate(proc: subprocess.Popen) -> tuple[str, str]:
     """Kill a tool process and everything it spawned, then drain its pipes."""
     _kill_group(proc)
@@ -127,6 +144,8 @@ class CliRunner:
             text=True,
             **GROUP_KWARGS,
         )
+        with _LIVE_LOCK:
+            _LIVE.add(proc)
         try:
             stdout, stderr = proc.communicate(timeout=timeout)
             return RawOutput(argv, proc.returncode, stdout, stderr), False
@@ -138,6 +157,9 @@ class CliRunner:
             # survives the cell, invisible and holding gigabytes.
             _terminate(proc)
             raise
+        finally:
+            with _LIVE_LOCK:
+                _LIVE.discard(proc)
 
     def parse(self, source: str, module: str) -> CheckResult:
         """Syntax- and level-check a module with SANY."""
@@ -180,12 +202,17 @@ class CliRunner:
         extra_modules: dict[str, str] | None = None,
         collect: str | None = None,
         declared: list[str] | None = None,
+        heap: str | None = None,
     ) -> CheckResult:
         """Model-check a module with TLC.
 
         `extra_modules` are written alongside, so a generated companion module
         can EXTEND the spec. `collect` is a glob read back out of the working
         directory before it is destroyed -- TLC writes animation frames there.
+
+        `heap` caps the JVM's maximum heap (for example "2G"). It matters most
+        for sweeps: several unbounded TLC processes will ask for more memory
+        than the machine has.
 
         `declared` overrides the VARIABLES read from `source`. A companion
         module inherits its variables through EXTENDS and declares none of its
@@ -201,6 +228,8 @@ class CliRunner:
                 (work / f"{name}.tla").write_text(text)
             argv = [
                 _java(),
+                # JVM options must precede -cp.
+                *([f"-Xmx{heap}"] if heap else []),
                 "-cp",
                 self._classpath(),
                 "tlc2.TLC",

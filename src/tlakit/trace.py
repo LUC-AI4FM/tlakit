@@ -31,7 +31,15 @@ def _action_from(entry: dict[str, Any]) -> Action:
 
 
 def trace_from_json(data: dict[str, Any]) -> Trace:
-    counterexample = data.get("counterexample") or {}
+    """Build a Trace from TLC's JSON, wrapped or not.
+
+    TLC writes `{"vars": ..., "counterexample": {"state": ..., "action": ...}}`,
+    but tooling that unwraps it before saving leaves the bare inner object on
+    disk. Accept both rather than silently returning an empty trace.
+    """
+    counterexample = data.get("counterexample")
+    if not isinstance(counterexample, dict):
+        counterexample = data if ("state" in data or "action" in data) else {}
     states = [state for _, state in counterexample.get("state", [])]
     actions = [_action_from(edge[1]) for edge in counterexample.get("action", [])]
     return Trace(states=states, actions=actions)

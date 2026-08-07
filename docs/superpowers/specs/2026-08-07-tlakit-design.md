@@ -290,11 +290,24 @@ M1 alone is already more than any maintained tool offers from Python.
    small. File against `tlaplus/vscode-tlaplus` with the spike attached.
 2. **Python MCP client.** If the above lands, the client written for `McpRunner`
    is useful to anyone driving the toolchain from Python.
-3. **Deduplicate Specula's TLC integrations.** Replace the `-dumpTrace json`
-   handling in `inv_checking_tool` with tlakit as a first, narrow pull request.
-   It is small, it is obviously an improvement to them rather than a land grab,
-   and it is the only credible way to find out whether the substrate framing
-   survives contact with a real consumer.
+3. **Talk to Specula before proposing anything.** The first plan was to replace
+   `inv_checking_tool`'s `-dumpTrace json` handling with tlakit. Reading the code
+   killed that idea: `TLCOutputReader` is not a parser, it is a trace *query* API
+   built for LLM agents — `get_variable_at_path`, `compare_states`,
+   `find_variable_changes`, `search_states`, negative and range indexing, text-mode
+   fallback for when no JSON counterexample exists. tlakit overlapped roughly 40
+   of its 787 lines. A pull request that swaps 40 lines for a new third-party
+   dependency is a bad trade for them and would deserve to be rejected.
+
+   The honest sequence is an issue first, asking whether a shared layer is wanted
+   and pointing at the three unshared integrations, then code only if they say yes.
+
+   The borrowing has in fact run the other way. Testing tlakit against Specula's
+   own trace fixture exposed a defect — tlakit assumed TLC's `counterexample`
+   wrapper and returned zero states for the unwrapped shape that tooling actually
+   stores — and `TLCOutputReader`'s surface is what `Trace.variables`,
+   `Trace.value_at`, `Trace.changes`, and `Trace.compare` were modelled on. Being
+   a substrate started by learning from a consumer, not by refactoring one.
 
 ## Out of scope for v1
 

@@ -77,6 +77,47 @@ class Trace:
     def __len__(self) -> int:
         return len(self.states)
 
+    def __getitem__(self, index: int) -> dict[str, Any]:
+        """Zero-based state access. Negative indices count from the end."""
+        return self.states[index]
+
+    def __iter__(self):
+        return iter(self.states)
+
+    @property
+    def variables(self) -> list[str]:
+        """Every variable name appearing anywhere in the trace, sorted."""
+        return sorted({key for state in self.states for key in state})
+
+    def value_at(self, index: int, path: str) -> Any:
+        """Look up a dotted path into a state, e.g. `"progress.s1"`.
+
+        TLA+ records nest arbitrarily, so a consumer inspecting one field of
+        one server should not have to walk the dictionaries itself.
+        """
+        value = self.states[index]
+        walked: list[str] = []
+        for part in path.split("."):
+            if not isinstance(value, dict) or part not in value:
+                where = ".".join(walked) or "<state>"
+                raise KeyError(f"{path!r}: {part!r} not found under {where}")
+            walked.append(part)
+            value = value[part]
+        return value
+
+    def changes(self, name: str) -> list[int]:
+        """Indices of the states at which `name` took a new value."""
+        return [i for i in range(1, len(self.states)) if name in self.delta(i)]
+
+    def compare(self, left: int, right: int) -> dict[str, tuple[Any, Any]]:
+        """Variables differing between two states, as `name -> (before, after)`."""
+        a, b = self.states[left], self.states[right]
+        return {
+            key: (a.get(key), b.get(key))
+            for key in sorted(set(a) | set(b))
+            if a.get(key) != b.get(key)
+        }
+
     def delta(self, index: int) -> frozenset[str]:
         """Variables whose value differs from the previous state.
 

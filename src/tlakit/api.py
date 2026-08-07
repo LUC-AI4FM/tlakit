@@ -11,15 +11,27 @@ from .result import CheckResult
 
 _MODULE_HEADER = re.compile(r"^-{4,}\s*MODULE\s+(\w+)\s*-{4,}", re.M)
 
-_runner: CliRunner | None = None
+#: Cached runners, keyed on the jars they actually resolved to. A single global
+#: would let the first caller in a process fix the toolchain for everyone else,
+#: which matters now that other projects embed tlakit alongside their own code.
+_runners: dict[tuple[Path, Path | None], CliRunner] = {}
 
 
-def default_runner() -> CliRunner:
-    """A process-wide runner, built lazily so importing tlakit needs no Java."""
-    global _runner
-    if _runner is None:
-        _runner = CliRunner()
-    return _runner
+def default_runner(
+    tools_jar: Path | None = None, community_jar: Path | None = None
+) -> CliRunner:
+    """A runner for this configuration, built lazily.
+
+    Importing tlakit needs no Java; only calling this does. Resolution runs on
+    every call, so changing TLAKIT_TLA2TOOLS takes effect immediately instead
+    of being masked by a cached runner.
+    """
+    from .jar import find_community_jar, find_tools_jar
+
+    key = (find_tools_jar(tools_jar), find_community_jar(community_jar))
+    if key not in _runners:
+        _runners[key] = CliRunner(*key)
+    return _runners[key]
 
 
 def module_name_of(source: str) -> str:

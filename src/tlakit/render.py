@@ -37,6 +37,11 @@ _HEADLINE = {
     Outcome.DEADLOCK: "Deadlock reached.",
     Outcome.TEMPORAL_VIOLATION: "Temporal property violated.",
     Outcome.PARSE_ERROR: "The specification did not parse.",
+    Outcome.ASSUMPTION_VIOLATION: "An ASSUME was violated.",
+    Outcome.ASSERTION_FAILED: "An assertion failed.",
+    Outcome.EVALUATION_ERROR: "TLC could not evaluate the specification.",
+    Outcome.CONFIG_ERROR: "The configuration did not parse.",
+    Outcome.STATE_SPACE_TOO_LARGE: "The state space is too large for TLC.",
     Outcome.ERROR: "The tool reported an error.",
 }
 

@@ -1,4 +1,5 @@
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -87,7 +88,8 @@ def test_raw_is_always_populated(runner):
     result = runner.check(OK, "Ok", OK_CFG)
     assert result.raw.exit_code == 0
     assert "TLC2 Version" in result.raw.stdout
-    assert result.raw.argv[0].endswith("java")
+    # java.exe on Windows.
+    assert Path(result.raw.argv[0]).stem == "java"
 
 
 def test_timeout_returns_partial_result_not_an_exception(runner):
@@ -142,9 +144,13 @@ def test_terminate_kills_a_running_process():
 
     from tlakit.cli import _terminate
 
+    import sys
+
+    from tlakit.cli import GROUP_KWARGS
+
     proc = sp.Popen(
-        ["sleep", "60"], stdout=sp.PIPE, stderr=sp.PIPE, text=True,
-        start_new_session=True,
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        stdout=sp.PIPE, stderr=sp.PIPE, text=True, **GROUP_KWARGS,
     )
     _terminate(proc)
     deadline = time.time() + 5
@@ -158,8 +164,12 @@ def test_terminate_is_safe_on_an_already_dead_process():
 
     from tlakit.cli import _terminate
 
-    proc = sp.Popen(["true"], stdout=sp.PIPE, stderr=sp.PIPE, text=True,
-                    start_new_session=True)
+    import sys
+
+    from tlakit.cli import GROUP_KWARGS
+
+    proc = sp.Popen([sys.executable, "-c", ""], stdout=sp.PIPE, stderr=sp.PIPE,
+                    text=True, **GROUP_KWARGS)
     proc.wait()
     _terminate(proc)  # must not raise
 

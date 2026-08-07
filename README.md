@@ -1,5 +1,7 @@
 # tlakit
 
+[![CI](https://github.com/LUC-AI4FM/tlakit/actions/workflows/ci.yml/badge.svg)](https://github.com/LUC-AI4FM/tlakit/actions/workflows/ci.yml)
+
 A Python and notebook client for the TLA+ toolchain.
 
 TLA+ has good tools — TLC, SANY, the TLA+ Debugger, the animation modules. None
@@ -47,7 +49,9 @@ implementation plan.
 ## Requirements
 
 - Python 3.10+
-- Java (for `tla2tools.jar`)
+- Java
+- TLA+ tools **v1.8.0 or newer** — tlakit runs TLC with `-dumpTrace json`;
+  v1.7.4 (TLC 2.19) does not have that option
 
 Point tlakit at the TLA+ tools with `TLAKIT_TLA2TOOLS=/path/to/tla2tools.jar`.
 `TLAKIT_COMMUNITY_MODULES` optionally locates `CommunityModules-deps.jar`, which

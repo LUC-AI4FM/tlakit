@@ -11,6 +11,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 from dataclasses import replace
 from pathlib import Path
@@ -47,21 +48,48 @@ def java_executable() -> str:
 _java = java_executable
 
 
-def _terminate(proc: subprocess.Popen) -> tuple[str, str]:
-    """Kill a tool process and everything it spawned, then drain its pipes.
+IS_WINDOWS = sys.platform == "win32"
 
-    `start_new_session=True` put the JVM in its own process group, so the whole
-    group goes at once. A stranded TLC will otherwise keep eating the machine.
+#: Keyword arguments that put a child in its own killable group.
+GROUP_KWARGS: dict[str, object] = (
+    {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}  # type: ignore[attr-defined]
+    if IS_WINDOWS
+    else {"start_new_session": True}
+)
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    """Kill the child and everything it spawned.
+
+    A plain `proc.kill()` reaches the launcher only. TLC forks nothing on
+    POSIX, but on Windows the java launcher and the JVM are separate processes,
+    so killing the launcher alone leaves the JVM holding its heap.
     """
+    if IS_WINDOWS:
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True,
+                check=False,
+            )
+            return
+        except OSError:
+            proc.kill()
+            return
     try:
         os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-    except (ProcessLookupError, PermissionError, AttributeError, OSError):
-        # No process groups on this platform, or the child is already gone.
+    except (ProcessLookupError, PermissionError, OSError):
+        # Already gone, or not ours to signal.
         proc.kill()
+
+
+def _terminate(proc: subprocess.Popen) -> tuple[str, str]:
+    """Kill a tool process and everything it spawned, then drain its pipes."""
+    _kill_group(proc)
     try:
-        return proc.communicate()
-    except ValueError:
-        # Pipes already closed by an earlier drain.
+        return proc.communicate(timeout=10)
+    except (ValueError, subprocess.TimeoutExpired):
+        # Pipes already closed by an earlier drain, or the drain itself hung.
         return "", ""
 
 
@@ -92,7 +120,7 @@ class CliRunner:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            start_new_session=True,
+            **GROUP_KWARGS,
         )
         try:
             stdout, stderr = proc.communicate(timeout=timeout)

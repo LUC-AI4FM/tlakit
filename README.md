@@ -1,5 +1,7 @@
 # tlakit
 
+[![CI](https://github.com/LUC-AI4FM/tlakit/actions/workflows/ci.yml/badge.svg)](https://github.com/LUC-AI4FM/tlakit/actions/workflows/ci.yml)
+
 A Python and notebook client for the TLA+ toolchain.
 
 TLA+ has good tools — TLC, SANY, the TLA+ Debugger, the animation modules. None

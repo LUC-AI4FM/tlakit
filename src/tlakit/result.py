@@ -69,6 +69,9 @@ class Trace:
     #: TLC's own state identifiers, parallel to `states`. Empty when the trace
     #: was built by hand rather than loaded from TLC.
     state_ids: list[Any] = field(default_factory=list)
+    #: The module's declared VARIABLES, when known. Everything else in a state
+    #: came from an ALIAS. Empty means "treat every key as a variable".
+    declared: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.states and len(self.actions) != len(self.states) - 1:
@@ -87,10 +90,27 @@ class Trace:
     def __iter__(self):
         return iter(self.states)
 
+    def _keys(self) -> set[str]:
+        return {key for state in self.states for key in state}
+
     @property
     def variables(self) -> list[str]:
-        """Every variable name appearing anywhere in the trace, sorted."""
-        return sorted({key for state in self.states for key in state})
+        """State variable names, sorted.
+
+        When the module's declarations are known, alias fields are excluded;
+        otherwise every key in the trace counts as a variable.
+        """
+        present = self._keys()
+        if not self.declared:
+            return sorted(present)
+        return sorted(present & set(self.declared))
+
+    @property
+    def aliases(self) -> list[str]:
+        """Keys contributed by an ALIAS rather than by the state, sorted."""
+        if not self.declared:
+            return []
+        return sorted(self._keys() - set(self.declared))
 
     def value_at(self, index: int, path: str) -> Any:
         """Look up a dotted path into a state, e.g. `"progress.s1"`.
@@ -112,19 +132,26 @@ class Trace:
         """Indices of the states at which `name` took a new value."""
         return [i for i in range(1, len(self.states)) if name in self.delta(i)]
 
-    def compare(self, left: int, right: int) -> dict[str, tuple[Any, Any]]:
+    def compare(
+        self, left: int, right: int, *, include_aliases: bool = False
+    ) -> dict[str, tuple[Any, Any]]:
         """Variables differing between two states, as `name -> (before, after)`."""
         a, b = self.states[left], self.states[right]
+        keys = set(a) | set(b)
+        if not include_aliases and self.declared:
+            keys &= set(self.declared)
         return {
             key: (a.get(key), b.get(key))
-            for key in sorted(set(a) | set(b))
+            for key in sorted(keys)
             if a.get(key) != b.get(key)
         }
 
-    def delta(self, index: int) -> frozenset[str]:
+    def delta(self, index: int, *, include_aliases: bool = False) -> frozenset[str]:
         """Variables whose value differs from the previous state.
 
-        `delta(0)` is empty: the initial state has no predecessor.
+        `delta(0)` is empty: the initial state has no predecessor. Alias fields
+        are excluded unless `include_aliases` is set — an alias is a view of
+        the state, so reporting it as a change double-counts.
         """
         if not 0 <= index < len(self.states):
             raise IndexError(index)
@@ -132,6 +159,8 @@ class Trace:
             return frozenset()
         before, after = self.states[index - 1], self.states[index]
         keys = set(before) | set(after)
+        if not include_aliases and self.declared:
+            keys &= set(self.declared)
         return frozenset(k for k in keys if before.get(k) != after.get(k))
 
     def to_dataframe(self):

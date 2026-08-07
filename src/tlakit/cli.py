@@ -17,6 +17,7 @@ from pathlib import Path
 from .jar import find_community_jar, find_tools_jar
 from .parse import parse_sany, parse_tlc
 from .result import CheckResult, Diagnostic, Outcome, RawOutput, Severity, Stats
+from .source import declared_variables
 from .trace import load_trace
 
 TRACE_FILE = "trace.json"
@@ -145,7 +146,7 @@ class CliRunner:
                 f"{module}.tla",
             ]
             raw, timed_out = self._run(argv, work, timeout)
-            trace = load_trace(work / TRACE_FILE)
+            trace = load_trace(work / TRACE_FILE, declared_variables(source))
 
         if timed_out:
             _, diagnostics, stats = parse_tlc(raw.stdout, None)

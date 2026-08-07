@@ -13,7 +13,10 @@ concurrency:
 env:
   # Pinned rather than "latest": a silent toolchain bump should show up as a
   # deliberate commit, not as a mystery CI failure.
-  TLA_TOOLS_TAG: v1.7.4
+  # v1.7.4 (TLC 2.19, Aug 2024) predates -dumpTrace, which tlakit passes on
+  # every run, so every check fails there with exit 1. v1.8.0 is the first
+  # release that has it.
+  TLA_TOOLS_TAG: v1.8.0
   COMMUNITY_MODULES_TAG: "202607311834"
 
 jobs:

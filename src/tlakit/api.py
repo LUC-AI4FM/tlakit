@@ -8,8 +8,37 @@ from typing import Any
 
 from .cli import CliRunner
 from .result import CheckResult
+from .source import declared_variables, defines_animview
 
 _MODULE_HEADER = re.compile(r"^-{4,}\s*MODULE\s+(\w+)\s*-{4,}", re.M)
+
+#: Names used by the generated animation companion module.
+ANIM_ALIAS = "TlakitAnimAlias"
+FRAME_PREFIX = "tlakit_anim_"
+
+
+def animation_module(module: str, variables: list[str]) -> str:
+    """A companion module that writes one SVG per state.
+
+    Generated rather than required of the user: the alias has to name every
+    variable, EXTEND SVG and IOUtils, and call Serialize with the right
+    options. That is boilerplate nobody should retype per spec, and getting it
+    subtly wrong yields an `Unknown operator` error that says nothing useful.
+    """
+    fields = "".join(f"    {name} |-> {name},\n" for name in variables)
+    return f"""---- MODULE {module}_anim ----
+EXTENDS {module}, TLC, IOUtils
+
+{ANIM_ALIAS} ==
+  [
+{fields}    _tlakit_frame |-> Serialize(
+        SVGElemToString(AnimView),
+        "{FRAME_PREFIX}" \\o ToString(TLCGet("level")) \\o ".svg",
+        [format |-> "TXT", charset |-> "UTF-8",
+         openOptions |-> <<"WRITE", "CREATE", "TRUNCATE_EXISTING">>]).exitValue
+  ]
+====
+"""
 
 #: Cached runners, keyed on the jars they actually resolved to. A single global
 #: would let the first caller in a process fix the toolchain for everyone else,
@@ -122,6 +151,7 @@ class Spec:
         properties: list[str] | None = None,
         timeout: float | None = None,
         coverage: bool = False,
+        animate: bool = False,
         extra_opts: list[str] | None = None,
     ) -> CheckResult:
         """Model-check with TLC.
@@ -142,8 +172,28 @@ class Spec:
         if coverage and "-coverage" not in options:
             # TLC gathers no coverage unless asked, and it is not free.
             options += ["-coverage", "1"]
+
+        if not animate:
+            return self._runner().check(
+                self.source, self.name, config, timeout=timeout, extra_opts=options
+            )
+
+        if not defines_animview(self.source):
+            raise ValueError(
+                f"{self.name} does not define AnimView, so there is nothing to "
+                "animate. Define `AnimView == Svg(<<...>>, [...])` using the "
+                "SVG.tla operators from CommunityModules."
+            )
+        companion = f"{self.name}_anim"
         return self._runner().check(
-            self.source, self.name, config, timeout=timeout, extra_opts=options
+            animation_module(self.name, declared_variables(self.source)),
+            companion,
+            config + f"ALIAS {ANIM_ALIAS}\n",
+            timeout=timeout,
+            extra_opts=options,
+            extra_modules={self.name: self.source},
+            collect=f"{FRAME_PREFIX}*.svg",
+            declared=declared_variables(self.source),
         )
 
 

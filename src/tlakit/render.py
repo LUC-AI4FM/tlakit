@@ -27,6 +27,13 @@ _CSS = """
 .tlakit-stats { opacity: .7; margin-top: 6px; }
 .tlakit-loop td, .tlakit-loop th { border-top: 2px solid rgba(120,90,220,.85); }
 .tlakit-loopnote { opacity: .8; margin-top: 4px; font-style: italic; }
+.tlakit-film { display: flex; gap: 10px; overflow-x: auto; padding: 6px 2px;
+               margin-top: 8px; }
+.tlakit-frame { flex: 0 0 auto; text-align: center; }
+.tlakit-frame svg { border: 1px solid rgba(127,127,127,.32); border-radius: 4px;
+                    background: #fff; display: block; max-width: 260px;
+                    height: auto; }
+.tlakit-frame figcaption { font-size: 11px; opacity: .7; margin-top: 3px; }
 </style>
 """
 
@@ -124,6 +131,30 @@ def _trace_html(result: CheckResult) -> str:
     return table
 
 
+def _frames_html(result: CheckResult) -> str:
+    """The spec's own AnimView output, one SVG per step, as a filmstrip.
+
+    Deliberately static: no JavaScript, so it renders in every frontend and in
+    an exported notebook. The interactive scrubber belongs to the anywidget
+    TraceView, not here.
+    """
+    if not result.frames:
+        return ""
+    figures = []
+    for index, svg in enumerate(result.frames, start=1):
+        action = ""
+        trace = result.trace
+        if trace is not None and 1 < index <= len(trace.states):
+            action = escape(trace.actions[index - 2].name)
+        caption = f"{index}" + (f" &middot; {action}" if action else "")
+        # SVG.tla emits a complete <svg> document; embed it as-is.
+        figures.append(
+            f'<figure class="tlakit-frame">{svg}'
+            f"<figcaption>{caption}</figcaption></figure>"
+        )
+    return '<div class="tlakit-film">' + "".join(figures) + "</div>"
+
+
 def result_html(result: CheckResult, source: str | None = None) -> str:
     """Render a CheckResult as self-contained HTML."""
     source = source if source is not None else result.source
@@ -137,6 +168,7 @@ def result_html(result: CheckResult, source: str | None = None) -> str:
     ]
     if source is not None:
         parts.append(_source_html(source, result))
+    parts.append(_frames_html(result))
     parts.append(_trace_html(result))
     parts.append(_stats_html(result))
     parts.append("</div>")

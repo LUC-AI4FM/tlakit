@@ -48,3 +48,11 @@ def declared_variables(source: str) -> list[str]:
             if name and name not in names:
                 names.append(name)
     return names
+
+
+_ANIMVIEW = re.compile(r"^\s*AnimView\s*==", re.MULTILINE)
+
+
+def defines_animview(source: str) -> bool:
+    """Whether the module defines the SVG.tla animation view operator."""
+    return _ANIMVIEW.search(strip_comments(source)) is not None

@@ -172,12 +172,28 @@ class CliRunner:
         config: str,
         timeout: float | None = None,
         extra_opts: list[str] | None = None,
+        extra_modules: dict[str, str] | None = None,
+        collect: str | None = None,
+        declared: list[str] | None = None,
     ) -> CheckResult:
-        """Model-check a module with TLC."""
+        """Model-check a module with TLC.
+
+        `extra_modules` are written alongside, so a generated companion module
+        can EXTEND the spec. `collect` is a glob read back out of the working
+        directory before it is destroyed -- TLC writes animation frames there.
+
+        `declared` overrides the VARIABLES read from `source`. A companion
+        module inherits its variables through EXTENDS and declares none of its
+        own, so reading them from its text would find nothing and every alias
+        field would be mistaken for state.
+        """
+        frames: list[str] = []
         with tempfile.TemporaryDirectory(prefix="tlakit-") as tmp:
             work = Path(tmp)
             (work / f"{module}.tla").write_text(source)
             (work / f"{module}.cfg").write_text(config)
+            for name, text in (extra_modules or {}).items():
+                (work / f"{name}.tla").write_text(text)
             argv = [
                 _java(),
                 "-cp",
@@ -192,7 +208,18 @@ class CliRunner:
                 f"{module}.tla",
             ]
             raw, timed_out = self._run(argv, work, timeout)
-            trace = load_trace(work / TRACE_FILE, declared_variables(source))
+            names = declared if declared is not None else declared_variables(source)
+            trace = load_trace(work / TRACE_FILE, names)
+            if collect:
+                # Sort by the trailing step number, not lexically: frame 10
+                # must not sort between 1 and 2.
+                def step_of(path: Path) -> int:
+                    digits = "".join(c for c in path.stem if c.isdigit())
+                    return int(digits) if digits else 0
+
+                frames = [
+                    p.read_text() for p in sorted(work.glob(collect), key=step_of)
+                ]
 
         if trace is not None:
             trace = replace(trace, loop_start=parse_loop_start(raw.stdout))
@@ -207,8 +234,11 @@ class CliRunner:
                 )
             ] + diagnostics
             return CheckResult(
-                Outcome.TIMEOUT, diagnostics, trace, stats, raw, source=source
+                Outcome.TIMEOUT, diagnostics, trace, stats, raw,
+                source=source, frames=frames,
             )
 
         outcome, diagnostics, stats = parse_tlc(raw.stdout, raw.exit_code)
-        return CheckResult(outcome, diagnostics, trace, stats, raw, source=source)
+        return CheckResult(
+            outcome, diagnostics, trace, stats, raw, source=source, frames=frames
+        )

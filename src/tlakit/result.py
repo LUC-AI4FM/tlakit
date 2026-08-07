@@ -259,6 +259,9 @@ class CheckResult:
     #: The module source, when the runner knows it. Lets the notebook view
     #: point at the offending line.
     source: str | None = None
+    #: One standalone SVG per trace step, when the run was asked to animate.
+    #: Produced by the spec's own AnimView through SVG.tla, not by tlakit.
+    frames: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:

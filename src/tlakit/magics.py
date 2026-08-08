@@ -5,7 +5,7 @@ import shlex
 
 from IPython.core.magic import Magics, cell_magic, line_magic, magics_class
 
-from .api import Spec, module_name_of
+from .api import Spec, default_runner, module_name_of
 
 #: Module name -> source, for the current kernel session.
 MODULES: dict[str, str] = {}
@@ -65,8 +65,16 @@ class TlaMagics(Magics):
 
     @line_magic
     def tla_eval(self, line: str):
-        """Evaluate a constant TLA+ expression. Arrives in M2."""
-        raise TlaMagicError(
-            "%tla_eval arrives in M2 together with the REPL runner. For now, "
-            "express the property as an INVARIANT and use %%tlc."
-        )
+        """Evaluate a constant TLA+ expression with `tlc2.REPL`.
+
+        Usage: `%tla_eval <expression>`. The expression may reference an
+        operator from any module defined earlier in the session with `%%tla`.
+        """
+        expr = line.strip()
+        if not expr:
+            raise TlaMagicError("Usage: %tla_eval <expression>")
+        result = default_runner().eval(expr, modules=MODULES)
+        if not result.ok:
+            detail = "; ".join(str(d) for d in result.diagnostics) or "evaluation failed"
+            raise TlaMagicError(f"%tla_eval failed: {detail}")
+        return result.value

@@ -443,3 +443,126 @@ def test_unicode_in_a_spec_survives_a_round_trip(runner):
     result = runner.check(spec, "Uni", "SPECIFICATION Spec\nINVARIANT Inv\n")
     assert result.outcome is Outcome.INVARIANT_VIOLATION
     assert [s["x"] for s in result.trace.states] == [0, 1, 2, 3]
+
+
+# --- issue #17: %tla_eval via tlc2.REPL -------------------------------------
+
+WIDGET_WITH_OP = """---- MODULE Widget ----
+EXTENDS Naturals
+VARIABLE x
+Double(n) == n * 2
+====
+"""
+
+
+def test_operator_definitions_strips_header_footer_and_declarations():
+    from tlakit.cli import _operator_definitions
+
+    defs = _operator_definitions(WIDGET_WITH_OP)
+    assert "MODULE" not in defs
+    assert "====" not in defs
+    assert "EXTENDS" not in defs
+    assert "VARIABLE" not in defs
+    assert "Double(n) == n * 2" in defs
+
+
+def test_repl_result_parses_a_successful_value():
+    from tlakit.cli import _repl_result
+    from tlakit.result import RawOutput
+
+    result = _repl_result(RawOutput(["java"], 0, "42\n", ""))
+    assert result.ok
+    assert result.value == 42
+
+
+def test_repl_result_surfaces_an_evaluation_error_as_a_diagnostic():
+    from tlakit.cli import _repl_result
+    from tlakit.result import RawOutput
+
+    stdout = (
+        "Error evaluating expression: 'nope'\n"
+        "[line 6, col 14 to line 6, col 18 of module tlarepl\n\n"
+        "Unknown operator: `nope'.]\n"
+    )
+    result = _repl_result(RawOutput(["java"], 0, stdout, ""))
+    assert not result.ok
+    assert result.outcome is Outcome.EVALUATION_ERROR
+    assert result.value is None
+    assert any("Unknown operator" in d.message for d in result.errors)
+
+
+def test_eval_splices_a_prior_module_into_a_let(tmp_path, monkeypatch):
+    """No jar needed: `_run` is faked, so this proves the argv the REPL
+    receives actually contains the referenced module's operator, not that
+    the REPL itself can resolve it."""
+    from tlakit.result import RawOutput
+
+    runner = _fake_jar_runner(tmp_path)
+    captured = {}
+
+    def fake_run(argv, cwd, timeout):
+        captured["argv"] = argv
+        return RawOutput(argv, 0, "42\n", ""), False
+
+    monkeypatch.setattr(runner, "_run", fake_run)
+    result = runner.eval("Double(21)", modules={"Widget": WIDGET_WITH_OP})
+
+    assert result.ok
+    assert result.value == 42
+    expr_arg = captured["argv"][-1]
+    assert "LET" in expr_arg
+    assert "Double(n) == n * 2" in expr_arg
+    assert expr_arg.endswith("Double(21)")
+
+
+def test_eval_passes_the_bare_expression_when_there_are_no_modules(tmp_path, monkeypatch):
+    from tlakit.result import RawOutput
+
+    runner = _fake_jar_runner(tmp_path)
+    captured = {}
+
+    def fake_run(argv, cwd, timeout):
+        captured["argv"] = argv
+        return RawOutput(argv, 0, "2\n", ""), False
+
+    monkeypatch.setattr(runner, "_run", fake_run)
+    runner.eval("1 + 1")
+
+    assert captured["argv"][-1] == "1 + 1"
+
+
+def test_eval_reports_a_timeout(tmp_path, monkeypatch):
+    from tlakit.result import RawOutput
+
+    runner = _fake_jar_runner(tmp_path)
+
+    def fake_run(argv, cwd, timeout):
+        return RawOutput(argv, None, "", ""), True
+
+    monkeypatch.setattr(runner, "_run", fake_run)
+    result = runner.eval("1 + 1", timeout=1)
+
+    assert result.outcome is Outcome.TIMEOUT
+    assert not result.ok
+
+
+@pytest.mark.java
+def test_eval_end_to_end_evaluates_a_simple_expression(runner):
+    result = runner.eval("1 + 1")
+    assert result.ok
+    assert result.value == 2
+
+
+@pytest.mark.java
+def test_eval_end_to_end_can_reference_a_prior_module(runner):
+    result = runner.eval("Double(21)", modules={"Widget": WIDGET_WITH_OP})
+    assert result.ok
+    assert result.value == 42
+
+
+@pytest.mark.java
+def test_eval_end_to_end_reports_an_evaluation_error_as_a_diagnostic(runner):
+    result = runner.eval("undefinedThing")
+    assert not result.ok
+    assert result.outcome is Outcome.EVALUATION_ERROR
+    assert any("Unknown operator" in d.message for d in result.errors)

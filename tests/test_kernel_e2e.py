@@ -9,6 +9,8 @@ pytest.importorskip("jupyter_client")
 import nbformat  # noqa: E402
 from nbclient import NotebookClient  # noqa: E402
 
+import tlakit  # noqa: E402
+
 pytestmark = pytest.mark.java
 
 MICROWAVE = """---- MODULE Microwave ----
@@ -86,7 +88,10 @@ def test_a_bare_config_cell_checks_the_only_module(kernel):
 def test_python_still_runs_in_a_tla_notebook(kernel):
     """The reason to build on IPython rather than replace it."""
     nb = run(["import tlakit; print('v', tlakit.__version__)"], kernel)
-    assert "v 0.1" in outputs_of(nb.cells[0])
+    # Compared against the version under test, not a literal prefix. Hardcoding
+    # "v 0.1" here made all 12 CI jobs fail on a release bump, which has nothing
+    # to do with whether Python cells still run in a TLA+ notebook.
+    assert f"v {tlakit.__version__}" in outputs_of(nb.cells[0])
 
 
 def test_the_legacy_tlc_header_is_accepted(kernel):

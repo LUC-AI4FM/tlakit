@@ -247,6 +247,9 @@ def test_a_clean_run_carries_no_deadlock_hint():
     assert "CHECK_DEADLOCK" not in html
 
 
+@pytest.mark.skipif(
+    not importlib.util.find_spec("IPython"), reason="IPython not installed"
+)
 def test_module_defined_names_the_module_and_its_variables():
     from tlakit.magics import ModuleDefined
     from tlakit.render import module_defined_html
@@ -255,3 +258,116 @@ def test_module_defined_names_the_module_and_its_variables():
     assert "Widget" in html
     assert "x, y" in html
     assert "Not parsed yet" in html
+
+
+def test_trace_str_simple():
+    trace = Trace(
+        states=[{"x": 0, "y": 7}, {"x": 1, "y": 7}],
+        actions=[Action("Next", "M", 5, 9)]
+    )
+    s = str(trace)
+    assert "step" in s
+    assert "action" in s
+    lines = s.splitlines()
+    assert any("step" in line and "action" in line and "x" in line and "y" in line for line in lines)
+    assert any("1" in line and "<initial>" in line and "0" in line and "7" in line for line in lines)
+    assert any("2" in line and "Next" in line and "1 *" in line and "7" in line for line in lines)
+
+
+def test_trace_str_truncation():
+    states = [{"x": i} for i in range(25)]
+    actions = [Action("Next") for _ in range(24)]
+    trace = Trace(states=states, actions=actions)
+    s = str(trace)
+    assert "5 states" in s
+    assert "omitted" in s
+    lines = s.splitlines()
+    assert len(lines) == 22
+    assert any("1" in line and "<initial>" in line for line in lines[:2])
+    assert any("10" in line and "Next" in line for line in lines[10:12])
+    assert any("5 states omitted" in line for line in lines)
+    assert any("16" in line and "Next" in line for line in lines[11:14])
+    assert any("25" in line and "Next" in line for line in lines[20:])
+
+
+def test_trace_str_lasso():
+    trace = Trace(
+        states=[{"x": 0}, {"x": 1}, {"x": 2}],
+        actions=[Action("Next"), Action("Next")],
+        loop_start=1
+    )
+    s = str(trace)
+    assert "Lasso: the behaviour repeats from step 2 onwards." in s
+
+
+def test_trace_str_empty():
+    trace = Trace(states=[])
+    assert str(trace) == ""
+
+
+def test_check_result_str_deadlock():
+    trace = Trace(
+        states=[{"x": 0}, {"x": 1}],
+        actions=[Action("Next")]
+    )
+    r = CheckResult(
+        Outcome.DEADLOCK,
+        [Diagnostic(Severity.ERROR, "Deadlock reached at state 2")],
+        trace,
+        Stats(distinct=17, depth=4),
+        RAW
+    )
+    s = str(r)
+    assert s.startswith("DEADLOCK  \u2014  17 states explored, depth 4")
+    assert "  error: Deadlock reached at state 2" in s
+    assert "A state with no successor. That is a real deadlock only if this" in s
+    assert "step" in s
+    assert "action" in s
+    assert "1" in s
+    assert "<initial>" in s
+    assert "2" in s
+    assert "Next" in s
+    assert "1 *" in s
+
+
+def test_check_result_str_clean_run():
+    r = CheckResult(
+        Outcome.OK,
+        [],
+        None,
+        Stats(distinct=45, depth=10),
+        RAW
+    )
+    s = str(r)
+    assert s.startswith("OK  \u2014  45 states explored, depth 10")
+    assert "error" not in s
+    assert "Note: A state with no successor" not in s
+
+
+def test_check_result_str_source_highlight():
+    r = CheckResult(
+        Outcome.PARSE_ERROR,
+        [Diagnostic(Severity.ERROR, "boom", module="M", line=2)],
+        None,
+        Stats(),
+        RAW,
+        source="---- MODULE M ----\nVARIABLE x\n====\n"
+    )
+    s = str(r)
+    assert "PARSE_ERROR" in s
+    assert "  error: M:2: boom" in s
+    assert "  >   2  VARIABLE x" in s
+    assert "      1  ---- MODULE M ----" in s
+
+
+def test_check_result_str_unused_actions():
+    from tlakit.result import Coverage
+    r = CheckResult(
+        Outcome.OK,
+        [],
+        None,
+        Stats(distinct=5, depth=2, coverage={"Next": Coverage("Next", 0, 0)}),
+        RAW
+    )
+    s = str(r)
+    assert "warning: Never enabled: Next. An action that never fires" in s

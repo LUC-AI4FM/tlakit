@@ -514,3 +514,155 @@ def stepper_view(
     if not trace.states:
         return None
     return TraceView(trace)
+
+
+def trace_text(trace: Trace, indent: str = "  ") -> str:
+    if not trace.states:
+        return ""
+
+    variables = sorted({key for state in trace.states for key in state})
+
+    total_states = len(trace.states)
+    if total_states <= 20:
+        visible_indices = list(range(total_states))
+    else:
+        visible_indices = list(range(10)) + [None] + list(range(total_states - 10, total_states))
+
+    # Calculate column widths using the visible rows + headers
+    col_widths = {
+        "step": len("step"),
+        "action": len("action"),
+    }
+    for v in variables:
+        col_widths[v] = len(v)
+
+    steps_data: list[dict[str, str] | None] = []
+    for index in visible_indices:
+        if index is None:
+            steps_data.append(None)
+            continue
+
+        state = trace.states[index]
+        changed = trace.delta(index)
+
+        step_str = str(index + 1)
+        action_str = "<initial>" if index == 0 else trace.actions[index - 1].name
+
+        col_widths["step"] = max(col_widths["step"], len(step_str))
+        col_widths["action"] = max(col_widths["action"], len(action_str))
+
+        row_data = {
+            "step": step_str,
+            "action": action_str,
+        }
+
+        for v in variables:
+            val = state.get(v)
+            cell_str = repr(val)
+            if index > 0 and v in changed:
+                cell_str += " *"
+            row_data[v] = cell_str
+            col_widths[v] = max(col_widths[v], len(cell_str))
+
+        steps_data.append(row_data)
+
+    # Format header
+    header_parts = [
+        "step".rjust(col_widths["step"]),
+        "action".ljust(col_widths["action"]),
+    ]
+    for v in variables:
+        header_parts.append(v.ljust(col_widths[v]))
+    header_line = indent + "  ".join(header_parts)
+    lines = [header_line.rstrip()]
+
+    # Format rows
+    for row_data in steps_data:
+        if row_data is None:
+            omitted = total_states - 20
+            lines.append(f"{indent}... ({omitted} state{'s' if omitted > 1 else ''} omitted) ...")
+            continue
+
+        row_parts = [
+            row_data["step"].rjust(col_widths["step"]),
+            row_data["action"].ljust(col_widths["action"]),
+        ]
+        for v in variables:
+            row_parts.append(row_data[v].ljust(col_widths[v]))
+        line = indent + "  ".join(row_parts)
+        lines.append(line.rstrip())
+
+    # Lasso repeating note
+    if trace.is_lasso:
+        lines.append(f"{indent}Lasso: the behaviour repeats from step {trace.loop_start + 1} onwards.")
+
+    return "\n".join(lines)
+
+
+def _source_text(source: str, result: CheckResult, indent: str = "  ") -> str:
+    hit_lines = {d.line for d in result.diagnostics if d.line is not None}
+    if not hit_lines:
+        return ""
+    rendered = []
+    for number, text in enumerate(source.splitlines(), start=1):
+        marker = ">" if number in hit_lines else " "
+        rendered.append(f"{indent}{marker} {number:>3}  {text}")
+    return "\n".join(rendered)
+
+
+def result_text(result: CheckResult) -> str:
+    # 1. Headline / Outcome name
+    status_line = result.outcome.name
+
+    # Stats
+    s = result.stats
+    bits = []
+    if s.distinct is not None:
+        bits.append(f"{s.distinct} state{'s' if s.distinct != 1 else ''} explored")
+    elif s.generated is not None:
+        bits.append(f"{s.generated} state{'s' if s.generated != 1 else ''} generated")
+
+    if s.depth is not None:
+        bits.append(f"depth {s.depth}")
+
+    if bits:
+        status_line += f"  \u2014  {', '.join(bits)}"
+
+    parts = [status_line]
+
+    # 2. Diagnostics
+    diagnostics_lines = []
+    for d in result.diagnostics:
+        diagnostics_lines.append(f"  {d.severity.value}: {d}")
+
+    if result.outcome is Outcome.DEADLOCK:
+        hint_text = (
+            "A state with no successor. That is a real deadlock only if this "
+            "specification was not meant to terminate \u2014 TLC cannot tell the two apart. "
+            "If it was, turn the check off: CHECK_DEADLOCK FALSE in the "
+            "config, or check_deadlock=False from Python."
+        )
+        diagnostics_lines.append(f"  Note: {hint_text}")
+
+    unused = result.stats.unused_actions
+    if unused:
+        names = ", ".join(unused)
+        diagnostics_lines.append(
+            f"  warning: Never enabled: {names}. An action that never fires means "
+            "the specification may be passing for the wrong reason."
+        )
+
+    if diagnostics_lines:
+        parts.append("\n".join(diagnostics_lines))
+
+    # 3. Source code snippet (if any)
+    if result.source is not None:
+        src_text = _source_text(result.source, result)
+        if src_text:
+            parts.append(src_text)
+
+    # 4. Trace (if any)
+    if result.trace is not None and result.trace.states:
+        parts.append(trace_text(result.trace))
+
+    return "\n\n".join(p for p in parts if p)

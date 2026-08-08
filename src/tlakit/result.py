@@ -196,6 +196,11 @@ class Trace:
     def __iter__(self):
         return iter(self.states)
 
+    def __str__(self) -> str:
+        from .render import trace_text
+
+        return trace_text(self)
+
     @property
     def is_lasso(self) -> bool:
         """True when the behaviour ends by cycling rather than stopping."""
@@ -394,3 +399,8 @@ class CheckResult:
         from .render import result_html  # lazy: render imports result
 
         return result_html(self)
+
+    def __str__(self) -> str:
+        from .render import result_text
+
+        return result_text(self)

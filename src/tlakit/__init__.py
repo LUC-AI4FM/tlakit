@@ -57,7 +57,19 @@ __all__ = [
 
 
 def load_ipython_extension(ipython) -> None:
-    """Support `%load_ext tlakit`."""
+    """Support `%load_ext tlakit`.
+
+    In a browser this also switches to the remote runner and turns on TLA+ cell
+    routing, because there is no other way to work there: Pyodide has no JVM and
+    no `subprocess`. Locally it registers the magics only -- redirecting a local
+    user's checks to someone else's server would be surprising, and their own
+    TLC is faster and unmetered.
+    """
     from .magics import TlaMagics
 
     ipython.register_magics(TlaMagics)
+
+    from .notebook import in_browser, setup
+
+    if in_browser():
+        setup(shell=ipython)

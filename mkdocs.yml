@@ -48,6 +48,7 @@ markdown_extensions:
 
 nav:
   - Reference: reference.md
+  - Environments: environments.md
   - API: api.md
 
 # A warning here is a broken cross-reference or an orphaned page, both of

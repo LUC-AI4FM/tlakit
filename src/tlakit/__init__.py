@@ -8,6 +8,7 @@ from __future__ import annotations
 # raised AttributeError until whatever else pulled the submodule in.
 from . import api, install, jar, remote, sweep
 from .api import (
+    Raw,
     Spec,
     build_config,
     check_source,
@@ -40,6 +41,7 @@ __all__ = [
     "JarNotFound",
     "JavaNotFound",
     "Outcome",
+    "Raw",
     "RawOutput",
     "Severity",
     "Spec",

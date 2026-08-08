@@ -7,5 +7,16 @@
     "generated": 1,
     "queue_left": 0
   },
-  "trace": null
+  "trace": {
+    "actions": [],
+    "loop_start": null,
+    "states": [
+      {
+        "x": 0
+      }
+    ],
+    "variables": [
+      "x"
+    ]
+  }
 }

@@ -9,6 +9,18 @@ only trustworthy oracle for "did this regress" is TLC itself.
 Adding a spec to the corpus is exactly: add a new directory here with those
 three files. No new test code required -- `_entries()` discovers it and
 `test_corpus_entry_matches_its_golden` parametrizes over it automatically.
+
+A golden is a claim about tlakit's output, not only about TLC's, so a change
+in what tlakit can *recover* from a run legitimately moves one. Two entries
+already show this: `broken_assertion_failed` and `broken_evaluation_error`
+both record a trace that was `null` when they were captured. TLC writes no
+`-dumpTrace json` file for either -- it dies mid-evaluation rather than
+finishing with a counterexample object -- but it does print "The behavior up
+to this point is:" followed by the states, and #4's text-mode fallback now
+reads them. Both traces were checked against real `tlc2.TLC` stdout before
+being pinned. When a golden moves, that is the bar: confirm the new value
+against the tool, then re-pin it. Re-pinning to whatever tlakit currently
+says is how this file stops being an oracle and becomes a mirror.
 """
 from __future__ import annotations
 

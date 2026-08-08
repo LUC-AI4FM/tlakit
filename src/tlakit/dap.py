@@ -487,10 +487,11 @@ class DebugSession:
             if self._client.wait_for_event("stopped", timeout=0.05) is not None:
                 return True
             if self._process.poll() is not None:
-                # A dead TLC is not suspended at a breakpoint, so a `stopped`
-                # still sitting in the queue is stale -- honouring it returns a
-                # stop that nothing can then be asked about.
-                return False
+                # Drain a stop that was genuinely delivered just before the
+                # exit -- dropping it loses a real state. If TLC is already too
+                # far gone to answer for it, `_request` fails fast and `step`
+                # treats that as exhaustion.
+                return self._client.wait_for_event("stopped", timeout=0.1) is not None
         return False
 
     def _request(self, command: str, timeout: float = 15.0, **arguments: Any) -> dict[str, Any]:

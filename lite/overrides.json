@@ -1,0 +1,6 @@
+{
+  "@jupyterlab/notebook-extension:tracker": {
+    "autoStartDefaultKernel": true,
+    "enableKernelInitNotification": true
+  }
+}

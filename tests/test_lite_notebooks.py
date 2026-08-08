@@ -86,6 +86,41 @@ def test_the_build_ships_notebooks():
 
 
 @pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
+def test_every_notebook_pins_the_kernel_it_wants(path: Path):
+    """Half of what stops the kernel picker opening on a cold visit (#70).
+
+    With no `kernelspec` in the metadata there is no preferred kernel to
+    start, so the app has nothing to do but ask -- and asking before the
+    kernelspecs have registered is what shows a first-time visitor a dialog
+    whose only option is "No Kernel". The name has to be `python`, which is
+    what the Pyodide kernel registers as and what `defaultKernelName` says.
+    """
+    nb = json.loads(path.read_text(encoding="utf-8"))
+    spec = nb.get("metadata", {}).get("kernelspec")
+    assert spec is not None, f"{path.name} pins no kernelspec"
+    assert spec.get("name") == "python", f"{path.name} pins {spec.get('name')!r}"
+
+
+def test_the_build_starts_the_pinned_kernel_without_asking():
+    """The other half of #70.
+
+    A pinned kernelspec is not enough on its own: `autoStartDefaultKernel`
+    defaults to false, so JupyterLab prompts rather than starting the
+    preferred kernel. `overrides.json` is the only place a JupyterLite build
+    can say otherwise -- it is copied into the site and patched into
+    `jupyter-lite.json` as `settingsOverrides` at build time.
+    """
+    overrides = json.loads(
+        (FILES.parent / "overrides.json").read_text(encoding="utf-8")
+    )
+    tracker = overrides.get("@jupyterlab/notebook-extension:tracker", {})
+    assert tracker.get("autoStartDefaultKernel") is True
+    # A cell run before the kernel is up otherwise sits at `[ ]` forever with
+    # nothing said anywhere, which is the half of #70 that looks like silence.
+    assert tracker.get("enableKernelInitNotification") is True
+
+
+@pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
 def test_every_config_cell_names_a_module_defined_above_it(path: Path):
     """The failure this prevents is a cell that checks the wrong spec.
 

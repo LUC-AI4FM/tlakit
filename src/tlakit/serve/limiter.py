@@ -45,15 +45,14 @@ class Rule:
 #: whether this number is 6 or 60. What the per-minute rule actually does is
 #: stop one address monopolising those two slots.
 #:
-#: 12/minute is a check every five seconds sustained, which is faster than a
-#: person reads a counterexample and comfortably absorbs a tutorial run plus
-#: edits and re-runs. It is deliberately not larger: the gate makes a bigger
-#: number safe for the *machine*, but a small one keeps a single tab from
-#: pushing everyone else onto the 503 path.
+#: 30/minute is set to what a person can use, not to what the machine can
+#: survive -- those are different numbers here, and the second one is enforced
+#: somewhere else entirely. The Mini cannot be overloaded by raising this,
+#: because the semaphore is a hard ceiling that does not depend on it:
+#: `test_the_machine_is_protected_by_the_gate_not_by_this_limit` pins that.
 #:
-#: The hourly ceiling matters for sustained abuse rather than for bursts:
-#: 200/hour is about seventeen minutes of continuous work.
-CHECK_RULES = (Rule(limit=12, window=60), Rule(limit=200, window=3600))
+#: The hourly ceiling is what catches sustained abuse, as opposed to bursts.
+CHECK_RULES = (Rule(limit=30, window=60), Rule(limit=300, window=3600))
 #: The page and health endpoint are cheap, but not free, and an open redirect of
 #: traffic through them would still cost bandwidth.
 CHEAP_RULES = (Rule(limit=120, window=60),)

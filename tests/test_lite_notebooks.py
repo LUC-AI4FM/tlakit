@@ -68,7 +68,9 @@ def test_links_between_notebooks_open_an_app(path: Path):
                 f"{path.name} links to {href!r}; a relative notebook link is "
                 f"rewritten into a raw download. Use one of {APP_URLS}."
             )
-    assert found or path.name == "scratch.ipynb"
+    # Every page points at at least one of the others; a page that stopped
+    # doing so would make the loop above vacuous.
+    assert found, f"{path.name} links to no other notebook"
 
 
 def test_the_build_ships_notebooks():

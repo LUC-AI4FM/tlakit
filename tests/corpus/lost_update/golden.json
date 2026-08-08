@@ -1,0 +1,89 @@
+{
+  "diagnostics": [
+    {
+      "column": null,
+      "line": null,
+      "message": "Invariant Correct is violated.",
+      "module": null,
+      "severity": "error"
+    }
+  ],
+  "outcome": "invariant_violation",
+  "stats": {
+    "depth": 5,
+    "distinct": 12,
+    "generated": 13,
+    "queue_left": 3
+  },
+  "trace": {
+    "actions": [
+      "Read",
+      "Read",
+      "Write",
+      "Write"
+    ],
+    "loop_start": null,
+    "states": [
+      {
+        "counter": 0,
+        "pc": {
+          "a": "read",
+          "b": "read"
+        },
+        "tmp": {
+          "a": 0,
+          "b": 0
+        }
+      },
+      {
+        "counter": 0,
+        "pc": {
+          "a": "write",
+          "b": "read"
+        },
+        "tmp": {
+          "a": 0,
+          "b": 0
+        }
+      },
+      {
+        "counter": 0,
+        "pc": {
+          "a": "write",
+          "b": "write"
+        },
+        "tmp": {
+          "a": 0,
+          "b": 0
+        }
+      },
+      {
+        "counter": 1,
+        "pc": {
+          "a": "done",
+          "b": "write"
+        },
+        "tmp": {
+          "a": 0,
+          "b": 0
+        }
+      },
+      {
+        "counter": 1,
+        "pc": {
+          "a": "done",
+          "b": "done"
+        },
+        "tmp": {
+          "a": 0,
+          "b": 0
+        }
+      }
+    ],
+    "variables": [
+      "counter",
+      "pc",
+      "tmp"
+    ]
+  }
+}

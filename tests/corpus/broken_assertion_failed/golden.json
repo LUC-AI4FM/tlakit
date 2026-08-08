@@ -1,0 +1,27 @@
+{
+  "diagnostics": [],
+  "outcome": "assertion_failed",
+  "stats": {
+    "depth": 2,
+    "distinct": 2,
+    "generated": 2,
+    "queue_left": 0
+  },
+  "trace": {
+    "actions": [
+      "Next"
+    ],
+    "loop_start": null,
+    "states": [
+      {
+        "x": 0
+      },
+      {
+        "x": 1
+      }
+    ],
+    "variables": [
+      "x"
+    ]
+  }
+}

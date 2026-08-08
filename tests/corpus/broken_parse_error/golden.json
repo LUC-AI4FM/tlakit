@@ -1,0 +1,19 @@
+{
+  "diagnostics": [
+    {
+      "column": 1,
+      "line": 7,
+      "message": "Encountered \"Beginning of definition\" at line 7, column 1 and token \"=\"",
+      "module": null,
+      "severity": "error"
+    }
+  ],
+  "outcome": "parse_error",
+  "stats": {
+    "depth": null,
+    "distinct": null,
+    "generated": null,
+    "queue_left": null
+  },
+  "trace": null
+}

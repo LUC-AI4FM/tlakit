@@ -1,0 +1,11 @@
+{
+  "diagnostics": [],
+  "outcome": "ok",
+  "stats": {
+    "depth": 8,
+    "distinct": 426,
+    "generated": 1390,
+    "queue_left": 0
+  },
+  "trace": null
+}

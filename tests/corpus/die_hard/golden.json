@@ -1,0 +1,63 @@
+{
+  "diagnostics": [
+    {
+      "column": null,
+      "line": null,
+      "message": "Invariant NotSolved is violated.",
+      "module": null,
+      "severity": "error"
+    }
+  ],
+  "outcome": "invariant_violation",
+  "stats": {
+    "depth": 7,
+    "distinct": 14,
+    "generated": 73,
+    "queue_left": 1
+  },
+  "trace": {
+    "actions": [
+      "FillBig",
+      "BigToSmall",
+      "EmptySmall",
+      "BigToSmall",
+      "FillBig",
+      "BigToSmall"
+    ],
+    "loop_start": null,
+    "states": [
+      {
+        "big": 0,
+        "small": 0
+      },
+      {
+        "big": 5,
+        "small": 0
+      },
+      {
+        "big": 2,
+        "small": 3
+      },
+      {
+        "big": 2,
+        "small": 0
+      },
+      {
+        "big": 0,
+        "small": 2
+      },
+      {
+        "big": 5,
+        "small": 2
+      },
+      {
+        "big": 4,
+        "small": 3
+      }
+    ],
+    "variables": [
+      "big",
+      "small"
+    ]
+  }
+}

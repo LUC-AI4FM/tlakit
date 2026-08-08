@@ -1,0 +1,11 @@
+{
+  "diagnostics": [],
+  "outcome": "assumption_violation",
+  "stats": {
+    "depth": null,
+    "distinct": null,
+    "generated": null,
+    "queue_left": null
+  },
+  "trace": null
+}

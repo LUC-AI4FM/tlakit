@@ -76,4 +76,7 @@ exclude = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["java: requires Java and tla2tools.jar"]
+markers = [
+    "java: requires Java and tla2tools.jar",
+    "apalache: requires the apalache-mc launcher",
+]

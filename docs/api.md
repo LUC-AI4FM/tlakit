@@ -93,6 +93,17 @@ notebook magics — which have no docstring to be generated from — see
         - describe
         - word_at
 
+## Apalache: the symbolic checker
+
+::: tlakit.apalache
+    options:
+      members:
+        - ApalacheRunner
+        - find_apalache
+        - trace_from_itf
+        - itf_value
+        - ApalacheNotFound
+
 ## Stepping under the TLA+ Debugger
 
 ::: tlakit.dap

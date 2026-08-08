@@ -55,19 +55,36 @@ class TlaMagics(Magics):
         Usage: `%%tla ModuleName [--no-parse]`. The module name may be omitted
         when the cell contains a `---- MODULE Name ----` header.
 
-        Parsing here is a convenience, not the point of the cell, so a runner
-        without SANY -- the remote service -- skips it rather than failing.
-        Syntax errors still surface, from the check that follows: TLC parses
-        before it explores.
+        Parsing here is a convenience, not the point of the cell. A runner that
+        cannot parse at all skips it; so does one that could not be reached.
+
+        That second case is why this is not simply `return spec.parse()`. Since
+        #67 the remote runner *can* parse, which means the browser's module
+        cell now depends on a network round trip -- and a service that is down,
+        busy, or rate-limiting would otherwise turn every `%%tla` into a
+        traceback. Storing the module is the part that must not fail: `%%tlc`
+        reads it from `MODULES`, and TLC parses before it explores, so a
+        syntax error still surfaces from the check either way.
+
+        A parse *error* is not caught here. That is an answer about the spec,
+        and it is the answer the reader asked for.
         """
         args = shlex.split(line)
         names = _positional(args)
         name = names[0] if names else module_name_of(cell)
         MODULES[name] = cell
         spec = Spec(source=cell, name=name)
+        defined = ModuleDefined(name=name, variables=declared_variables(cell))
         if "--no-parse" in args or not spec.can_parse:
-            return ModuleDefined(name=name, variables=declared_variables(cell))
-        return spec.parse()
+            return defined
+        try:
+            return spec.parse()
+        except Exception:
+            # Deliberately broad: every runner reaches SANY its own way, and
+            # the failure modes range from RemoteError to a missing JVM. None
+            # of them is a fact about the module, and none is worth losing the
+            # cell over.
+            return defined
 
     @cell_magic
     def tlc(self, line: str, cell: str):

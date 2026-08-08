@@ -407,13 +407,24 @@ class CliRunner:
         translated = (work / f"{module}.tla").read_text(encoding="utf-8")
         return translated, None
 
-    def parse(self, source: str, module: str, timeout: float | None = None) -> CheckResult:
+    def parse(
+        self,
+        source: str,
+        module: str,
+        timeout: float | None = None,
+        heap: str | None = None,
+    ) -> CheckResult:
         """Syntax- and level-check a module with SANY.
 
         A PlusCal algorithm block is translated first -- SANY has no idea
         what one is and reports a syntax error that never mentions PlusCal.
         `timeout` bounds that translation step; SANY itself remains untimed,
         as before.
+
+        `heap` caps the JVM, as it does for `check`. Left unset a JVM takes a
+        quarter of physical RAM as its maximum, which is fine for a developer
+        parsing their own module and not fine for a public endpoint parsing
+        anyone's -- `serve` passes its own limit.
         """
         with tempfile.TemporaryDirectory(prefix="tlakit-") as tmp:
             work = Path(tmp)
@@ -422,6 +433,7 @@ class CliRunner:
                 return failure
             argv = [
                 _java(),
+                *([f"-Xmx{heap}"] if heap else []),
                 "-cp",
                 self._classpath(),
                 "tla2sany.SANY",

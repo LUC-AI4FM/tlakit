@@ -40,6 +40,18 @@ DEFAULT_TIMEOUT_SECONDS = 15.0
 HEAP = "512M"
 #: How many checks may run at once, regardless of how many requests arrive.
 MAX_CONCURRENCY = 2
+#: How many parses may run at once, and deliberately a separate allowance.
+#:
+#: Sharing the check gate would mean a parse waits behind two 30-second
+#: searches, which is the opposite of the fast feedback #67 exposes SANY for.
+#: One extra permit is cheap in a way a third check would not be: SANY reads a
+#: module and stops, taking well under a second and `PARSE_HEAP` of memory, so
+#: the worst case here is one short-lived small JVM rather than another
+#: unbounded search.
+MAX_PARSE_CONCURRENCY = 1
+#: Per-parse JVM heap. SANY builds a syntax tree, not a state space; the check
+#: heap would be an order of magnitude more than it can use.
+PARSE_HEAP = "256M"
 #: Longest counterexample returned. A trace can otherwise be enormous.
 MAX_TRACE_STATES = 200
 #: A state graph is quadratic-ish in interest and linear in bytes; past a few
@@ -57,6 +69,8 @@ class Limits:
     concurrency: int = MAX_CONCURRENCY
     trace_states: int = MAX_TRACE_STATES
     graph_nodes: int = MAX_GRAPH_NODES
+    parse_concurrency: int = MAX_PARSE_CONCURRENCY
+    parse_heap: str = PARSE_HEAP
 
 
 def isolated_jar_dir(destination: Path | None = None) -> Path:

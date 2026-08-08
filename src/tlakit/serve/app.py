@@ -25,7 +25,13 @@ from ..api import build_config, module_name_of
 from ..result import Outcome
 from ..cli import CliRunner
 from . import Limits, RequestTooLarge, as_json, clamp_timeout, startup_checks, validate
-from .limiter import CHEAP_RULES, CHECK_RULES, RateLimiter, client_key
+from .limiter import (
+    CHEAP_RULES,
+    CHECK_RULES,
+    PARSE_RULES,
+    RateLimiter,
+    client_key,
+)
 
 
 #: When set, every request must present this value in X-Tlakit-Key. The edge
@@ -80,6 +86,20 @@ class CheckRequest(BaseModel):
     graph: bool = False
 
 
+class ParseRequest(BaseModel):
+    """A spec and nothing else.
+
+    No config, no invariants, no timeout: SANY reads one module and reports
+    what is wrong with it. Every field `CheckRequest` carries describes a
+    search, and there is no search here -- so `extra: forbid` refuses them
+    rather than accepting a request whose options could not have had an effect.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    spec: str = Field(description="A complete TLA+ module.")
+
+
 def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = None):
     from . import public_runner
 
@@ -87,7 +107,10 @@ def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = No
     runner = runner or public_runner()
     startup_checks(runner)
     gate = asyncio.Semaphore(limits.concurrency)
+    # Its own gate, not a share of `gate`: see MAX_PARSE_CONCURRENCY.
+    parse_gate = asyncio.Semaphore(limits.parse_concurrency)
     check_limiter = RateLimiter(rules=CHECK_RULES)
+    parse_limiter = RateLimiter(rules=PARSE_RULES)
     cheap_limiter = RateLimiter(rules=CHEAP_RULES)
 
     def key_of(request: Request) -> str:
@@ -192,11 +215,60 @@ def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = No
             "limits": {
                 "checks_per_minute": CHECK_RULES[0].limit,
                 "checks_per_hour": CHECK_RULES[1].limit,
+                "parses_per_minute": PARSE_RULES[0].limit,
+                "parses_per_hour": PARSE_RULES[1].limit,
                 "spec_bytes": limits.spec_bytes,
                 "max_timeout": limits.max_timeout,
                 "concurrency": limits.concurrency,
             },
         }
+
+    @app.post("/parse")
+    async def parse(
+        payload: ParseRequest,
+        request: Request,
+        x_tlakit_key: Optional[str] = Header(default=None),
+    ) -> Dict[str, Any]:
+        """Syntax- and level-check one module. No search, so no config.
+
+        This exists because a browser has no local SANY (#67): without it
+        `%%tla` can only report that a module was defined, and a syntax error
+        waits until the reader writes a config and runs a check -- a worse
+        moment to find out, with a message about the wrong thing.
+        """
+        enforce(parse_limiter, request)
+        require_key(x_tlakit_key)
+        try:
+            # Same ceiling as a check: the cost being bounded here is the
+            # module SANY has to read, which is the same text either way.
+            validate(payload.spec, "", limits)
+            module = module_name_of(payload.spec)
+        except (RequestTooLarge, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        if parse_gate.locked():
+            parse_limiter.refund(key_of(request))
+            raise HTTPException(status_code=503, detail="busy; retry shortly")
+
+        async with parse_gate:
+            result = await asyncio.to_thread(
+                runner.parse,
+                payload.spec,
+                module,
+                timeout=clamp_timeout(None, limits),
+                heap=limits.parse_heap,
+            )
+        if result.outcome is Outcome.ERROR:
+            # Same reasoning as /check: responses omit raw, so an unexpected
+            # SANY failure is otherwise invisible from both sides.
+            log.error(
+                "unexpected SANY failure: exit=%s argv=%s stderr=%s stdout=%s",
+                result.raw.exit_code,
+                result.raw.argv,
+                result.raw.stderr[:2000],
+                result.raw.stdout[:2000],
+            )
+        return as_json(result, limits)
 
     @app.post("/check")
     async def check(

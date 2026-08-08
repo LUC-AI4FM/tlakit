@@ -15,7 +15,8 @@
  */
 
 const MAX_BODY_BYTES = 64 * 1024; // must not exceed the origin's own cap
-const ALLOWED_PATHS = new Set(["/check", "/health"]);
+const ALLOWED_PATHS = new Set(["/check", "/parse", "/health"]);
+const POST_PATHS = new Set(["/check", "/parse"]);
 const UPSTREAM_TIMEOUT_MS = 40_000; // origin caps a check at 30s
 
 const CORS = {
@@ -42,7 +43,7 @@ export default {
     if (!ALLOWED_PATHS.has(url.pathname)) {
       return json({ error: "not found" }, 404);
     }
-    if (url.pathname === "/check" && request.method !== "POST") {
+    if (POST_PATHS.has(url.pathname) && request.method !== "POST") {
       return json({ error: "use POST" }, 405);
     }
     if (url.pathname === "/health" && request.method !== "GET") {
@@ -51,8 +52,16 @@ export default {
 
     // Rate limit by client address. Keyed per path so /health cannot exhaust
     // the budget that /check needs.
+    //
+    // /parse draws on a separate, much larger binding rather than sharing
+    // /check's. Keying by path already gives each its own counter, but not its
+    // own *limit* -- and a parse costs a SANY invocation with no state space,
+    // so pricing it like a check would throttle the fast feedback it exists to
+    // provide. A module cell parses on every edit.
     const who = request.headers.get("cf-connecting-ip") ?? "unknown";
-    const { success } = await env.CHECK_LIMITER.limit({
+    const limiter =
+      url.pathname === "/parse" ? env.PARSE_LIMITER : env.CHECK_LIMITER;
+    const { success } = await limiter.limit({
       key: `${url.pathname}:${who}`,
     });
     if (!success) {

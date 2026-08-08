@@ -13,6 +13,15 @@
       "name": "CHECK_LIMITER",
       "namespace_id": "4471",
       "simple": { "limit": 10, "period": 60 }
+    },
+    // Parsing is the cheap half: SANY reads the module and stops, with no
+    // state space to explore, so it is rationed separately and far more
+    // loosely. A `%%tla` cell parses on every edit, which is the rate this has
+    // to survive; the origin's own semaphore is what bounds concurrent JVMs.
+    {
+      "name": "PARSE_LIMITER",
+      "namespace_id": "4472",
+      "simple": { "limit": 60, "period": 60 }
     }
   ],
   "vars": {

@@ -26,18 +26,26 @@ their own TLC is faster and unmetered.
 | Where TLC runs | the public runner, over HTTPS | your Colab VM, after you install Java | your machine |
 | Install needed | none | `pip install tlakit` + a JRE + `python -m tlakit.install` | same as Colab, once |
 | Runner in use | `RemoteRunner` (automatic) | `CliRunner` | `CliRunner` |
-| `%%tla` parses with SANY | ✗ — no SANY on the service | ✓ | ✓ |
+| `%%tla` parses with SANY | ✓ — over HTTPS, via `/parse` | ✓ | ✓ |
 | `%tla_eval` | ✗ — no REPL on the service | ✓ | ✓ |
 | PlusCal translation | ✗ | ✓ | ✓ |
 | CommunityModules (`SVG`, `IOUtils`, `Json`) | ✗ — deliberately absent | ✓ if you fetch them | ✓ if you fetch them |
 | `spec.sweep(...)` | ✗ — needs local processes | ✓ | ✓ |
 | Apalache, TLA+ Debugger stepping | ✗ | ✓ if installed | ✓ if installed |
-| Limits | 30 checks/min, 300/hr, 30 s and 64 KiB each | none but the VM's | none |
+| Limits | 30 checks/min, 300/hr; 120 parses/min; 30 s and 64 KiB each | none but the VM's | none |
 | Survives a page reload | ✗ | ✗ (VM recycles) | ✓ |
 
 The browser column is short on capability *by construction*, not by neglect.
 Everything absent there is absent because it needs a local process, or because
 exposing it would mean running arbitrary specs' I/O on someone else's machine.
+
+Parsing used to be in that list and is not any more (#67). It came back because
+it is the one operation with no state space to explore: SANY reads the module
+and stops, so it costs a fraction of a check and can carry a budget four times
+larger. A module cell in the browser now reports what is actually wrong with a
+spec, on the line it is wrong on, instead of only that it was stored. If the
+service cannot be reached, `%%tla` falls back to storing the module rather than
+failing the cell — a network problem is not a fact about the spec.
 
 ## What each one is actually for
 

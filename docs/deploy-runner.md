@@ -86,6 +86,19 @@ curl -s -X POST https://tla-runner.ericspencer.us/parse \
   -d '{"spec":"---- MODULE M ----\nVARIABLE x\nInit == x = 0\n===="}'
 ```
 
+And that an uploaded `.tla` survives the edge, which is a separate path from
+the JSON one — the Worker parses JSON bodies to reject malformed ones early,
+and has to be told not to do that for multipart:
+
+```bash
+curl -s -F spec=@Counter.tla -F cfg=@Counter.cfg \
+  https://tla-runner.ericspencer.us/check -A tlakit-check
+```
+
+`{"error":"body must be JSON"}` means the Worker is older than this endpoint.
+A 422 about a "valid dictionary" means the Worker forwarded the body but
+flattened its `content-type`, losing the multipart boundary.
+
 Expect `{"outcome":"ok",...}`. `{"error":"not found"}` means the origin has the
 endpoint but the Worker was never redeployed, which is the failure the table
 above is about. `/health` reports `parses_per_minute` once the origin is

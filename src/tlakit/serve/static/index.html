@@ -198,6 +198,12 @@
   footer a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--rule)}
   footer a:hover{border-bottom-color:var(--ink)}
   .limits{display:flex;gap:18px;flex-wrap:wrap}
+  .api{margin-top:64px;padding-top:26px;border-top:1px solid var(--rule)}
+  .api h2{font-size:1.05rem;font-weight:600;margin:0 0 8px}
+  .api p{margin:0 0 12px;opacity:.75;max-width:62ch}
+  .api pre{background:rgba(23,21,15,.05);border:1px solid var(--rule);
+           border-radius:7px;padding:12px 14px;overflow-x:auto;margin:0 0 12px}
+  .api code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem}
 
   @media (max-width:860px){
     .composer{grid-template-columns:1fr}
@@ -255,6 +261,18 @@
 </section>
 
 <div id="out"></div>
+
+<section class="api">
+  <h2>Or from a terminal</h2>
+  <p>Upload the file rather than escaping it into JSON — a TLA⁺ module is
+     mostly newlines, backslashes and quotes.</p>
+  <pre><code>curl -F spec=@Counter.tla -F cfg=@Counter.cfg \
+  https://tla-runner.ericspencer.us/check</code></pre>
+  <p><code>cfg</code> is optional. <code>POST /parse</code> takes a
+     <code>spec</code> the same way and runs SANY only — no state space, so it
+     answers in milliseconds. The JSON form
+     (<code>{"spec": "...", "config": "..."}</code>) still works everywhere.</p>
+</section>
 
 <footer>
   <span>Model checked by <a href="https://github.com/tlaplus/tlaplus">TLC</a>,

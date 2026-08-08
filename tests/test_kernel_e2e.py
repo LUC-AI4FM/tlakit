@@ -105,3 +105,81 @@ def test_the_legacy_tlc_header_is_accepted(kernel):
 def test_a_config_with_no_module_explains_itself(kernel):
     nb = run(["SPECIFICATION Spec\nINVARIANT Safety"], kernel)
     assert "no module has been defined" in outputs_of(nb.cells[0])
+
+
+# --------------------------------------------------------------------------
+# Issue #35: completion and hover, over the real Jupyter message protocol.
+#
+# These do not go through NotebookClient, which only executes cells. A
+# `complete_request` is a different message, and the whole claim being tested
+# is that the kernel answers it in TLA+ rather than in Python -- so it has to
+# be the real request, on a real kernel, over a real socket.
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def client(kernel):
+    from jupyter_client.manager import start_new_kernel
+
+    manager, connection = start_new_kernel(kernel_name=kernel, startup_timeout=120)
+    try:
+        yield connection
+    finally:
+        connection.stop_channels()
+        manager.shutdown_kernel(now=True)
+
+
+def _reply(client, message_id):
+    while True:
+        reply = client.get_shell_msg(timeout=60)
+        if reply["parent_header"].get("msg_id") == message_id:
+            return reply["content"]
+
+
+def complete(client, code, cursor_pos=None):
+    cursor_pos = len(code) if cursor_pos is None else cursor_pos
+    return _reply(client, client.complete(code, cursor_pos))
+
+
+def inspect(client, code, cursor_pos):
+    return _reply(client, client.inspect(code, cursor_pos))
+
+
+def test_completion_in_a_tla_cell_answers_in_tla(client):
+    """The whole point of the kernel over magics in a Python kernel: ask what
+    `Su` completes to inside a module and the answer is `SubSeq`, an operator
+    read out of tla2tools.jar -- not a Python name."""
+    content = complete(client, "---- MODULE M ----\nEXTENDS Sequences\nSu")
+    assert content["status"] == "ok"
+    assert "SubSeq" in content["matches"]
+
+
+def test_completion_sees_a_module_from_an_earlier_cell(client):
+    """A session, not a cell: the module defined in one cell is in scope for
+    completion in the next."""
+    run_id = client.execute(MICROWAVE)
+    _reply(client, run_id)
+    content = complete(client, "---- MODULE Uses ----\nEXTENDS Microwave\nSaf")
+    assert "Safety" in content["matches"]
+
+
+def test_completion_in_a_python_cell_is_still_python(client):
+    """Routing applies to completion too. A Python cell must not start
+    offering TLA+ operators."""
+    content = complete(client, "import tlakit\ntlakit.check_sou")
+    assert any(m.endswith("check_source") for m in content["matches"]), content["matches"]
+
+
+def test_hover_describes_a_standard_operator(client):
+    code = "---- MODULE M ----\nEXTENDS Sequences\nX == Len(<<1>>)"
+    content = inspect(client, code, code.index("Len") + 1)
+    assert content["found"] is True
+    text = content["data"]["text/plain"]
+    assert "Len(s)" in text
+    assert "length of sequence" in text
+
+
+def test_hover_on_an_unknown_name_reports_not_found(client):
+    code = "---- MODULE M ----\nX == NoSuchOperator"
+    content = inspect(client, code, len(code) - 2)
+    assert content["found"] is False

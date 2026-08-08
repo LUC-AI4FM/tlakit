@@ -142,7 +142,9 @@ def as_json(result: CheckResult, limits: Limits) -> dict[str, Any]:
             if result.trace is not None
             else []
         )
-    return {
+    from .redact import redact_deep
+
+    payload = {
         "outcome": result.outcome.value,
         "ok": result.ok,
         "diagnostics": [
@@ -164,6 +166,9 @@ def as_json(result: CheckResult, limits: Limits) -> dict[str, Any]:
             "duration_ms": result.stats.duration_ms,
         },
     }
+    # Enforced rather than assumed: nothing about this host goes out, whatever
+    # a future TLC message happens to contain.
+    return redact_deep(payload)
 
 
 class RequestTooLarge(ValueError):

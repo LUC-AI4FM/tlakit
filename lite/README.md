@@ -22,12 +22,19 @@ sidebar, no launcher, and nothing to read:
 https://<site>/notebooks/index.html?path=scratch.ipynb
 ```
 
-`tests/test_lite_notebooks.py` guards these against the mistakes that are
-catchable without a network: a config cell that names no module, an option the
-service refuses, and a terminating spec checked without `CHECK_DEADLOCK FALSE`
-— which reports a correct specification as deadlocked. It does not run them.
-Executing every cell against the live runner is still a manual step, and worth
-doing before a deploy that changes a spec.
+`tests/test_lite_notebooks.py` guards these in two layers. Structurally: a
+config cell that names no module, `%pip` sharing a cell with code that needs
+what it installs, an option the service refuses, and a terminating spec checked
+without `CHECK_DEADLOCK FALSE` — which reports a correct specification as
+deadlocked. Then, against a local TLC with CommunityModules refused: every
+module through SANY, and every config cell compared against the outcome the
+notebook's prose promises, which is written down in `EXPECTED_OUTCOMES`. Add a
+config cell and that table has to grow with it.
+
+What none of that covers is the Python cells and the network path — the
+`spec.check(...)` calls, and whether the live service agrees with a local TLC.
+Run all three notebooks end to end against the real runner before a deploy that
+changes a spec.
 
 ## Build and serve
 

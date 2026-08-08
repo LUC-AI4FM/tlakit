@@ -1,0 +1,182 @@
+name: release
+
+# Tag-driven. `v0.1.0` publishes version 0.1.0 -- and the build refuses if the
+# tag and pyproject disagree, so a mistagged release fails before anything is
+# uploaded rather than shipping the wrong version under the right name.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to PyPI (otherwise build and attest only)"
+        type: boolean
+        default: false
+
+# Least privilege by default; each job widens only what it needs.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Nothing here pushes, and a lingering credential in the runner is
+          # exactly what a malicious dependency would look for.
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade build twine
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Tag must match the packaged version
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(python -c "
+          import tomllib, pathlib
+          print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])
+          ")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "packaged version: $version"
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME#v}"
+            if [ "$tag" != "$version" ]; then
+              echo "::error::tag v$tag does not match pyproject version $version"
+              exit 1
+            fi
+          fi
+
+      - name: Metadata must render on PyPI
+        # PyPI rejects a bad long_description *after* upload begins, which
+        # leaves a half-published release. Check it here instead.
+        run: python -m twine check --strict dist/*
+
+      - name: Install the wheel and smoke test it
+        # Tests the artifact, not the repo. A packaging mistake -- a module left
+        # out, or data files missing -- passes the test suite and fails here.
+        run: |
+          set -euo pipefail
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/python -m pip install --upgrade pip
+          /tmp/smoke/bin/python -m pip install dist/*.whl
+          cd /tmp   # import from an installed package, never the source tree
+          /tmp/smoke/bin/python - <<'PY'
+          import tlakit
+          from tlakit.remote import RemoteRunner
+          from tlakit.routing import classify
+          import importlib.resources as res
+
+          print("version:", tlakit.__version__)
+          # The landing page is package data; a wheel without it serves a 500.
+          page = res.files("tlakit.serve").joinpath("static/index.html").read_text(
+              encoding="utf-8"
+          )
+          assert "<html" in page.lower() or "<!doctype" in page.lower(), "landing page missing"
+          kind, _ = classify("---- MODULE M ----\n====\n")
+          assert kind == "tla", kind
+          assert RemoteRunner().endpoint.startswith("https://")
+          print("smoke test OK")
+          PY
+
+      - name: Confirm the sdist can rebuild the wheel
+        # A sdist that cannot rebuild is not a source distribution. This is how
+        # an over-eager exclude gets caught.
+        #
+        # The sdist is unpacked first because `python -m build` takes a source
+        # *directory*, not a tarball -- handing it the .tar.gz fails with
+        # "Source ... is not a directory". Building from the extracted tree is
+        # also the stronger check: it proves the archive alone is sufficient.
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/extracted /tmp/fromsdist
+          tar xzf dist/*.tar.gz -C /tmp/extracted
+          cd /tmp/extracted/*/
+          python -m build --wheel --outdir /tmp/fromsdist
+          ls -l /tmp/fromsdist
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  attest:
+    # Signed provenance linking these exact files to this workflow and commit,
+    # so a consumer can verify where the wheel came from with `gh attestation
+    # verify` rather than trusting the filename.
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: "dist/*"
+
+  publish:
+    needs: [build, attest]
+    if: github.event_name == 'push' || inputs.publish
+    runs-on: ubuntu-latest
+    # A GitHub environment with a required reviewer, so publishing to PyPI is a
+    # deliberate human click and not a consequence of pushing a tag.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/tlakit
+    permissions:
+      # Trusted publishing: PyPI verifies this OIDC token instead of us storing
+      # a long-lived API token that could be exfiltrated from repo secrets.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          attestations: true
+
+  github-release:
+    needs: [build, publish]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+      - name: Create the release with notes and artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "tlakit $VERSION" \
+            --generate-notes \
+            --verify-tag

@@ -143,6 +143,60 @@ def test_options_the_service_cannot_honour_raise(kwargs):
         runner.check("spec", "M", "cfg", **kwargs)
 
 
+def test_the_remote_runner_can_parse_now(monkeypatch):
+    """#67: it used to raise Unsupported. In a browser there is no local SANY,
+    so `%%tla` could only report that a module was defined."""
+    transport = transport_returning(200, {"outcome": "ok", "ok": True})
+    runner = RemoteRunner(transport=transport)
+
+    assert runner.can_parse is True
+    result = runner.parse("---- MODULE M ----\n====\n", "M")
+
+    assert transport.sent["url"] == f"{DEFAULT_ENDPOINT}/parse"
+    assert transport.sent["method"] == "POST"
+    assert result.outcome is Outcome.OK
+
+
+def test_parse_sends_the_spec_and_nothing_else():
+    """No config: the service's /parse forbids extra fields, so a stray key
+    here would 422 rather than be ignored."""
+    transport = transport_returning(200, {"outcome": "ok", "ok": True})
+    RemoteRunner(transport=transport).parse("SPEC TEXT", "M")
+
+    assert transport.sent["payload"] == {"spec": "SPEC TEXT"}
+
+
+def test_a_remote_parse_error_keeps_its_line():
+    """The line number is the whole point -- it is what lets a notebook put a
+    squiggle on the offending row instead of saying "it did not parse"."""
+    transport = transport_returning(
+        200,
+        {
+            "outcome": "parse_error",
+            "ok": False,
+            "diagnostics": [
+                {"severity": "error", "message": "Encountered '===='",
+                 "module": "M", "line": 3, "column": 1}
+            ],
+        },
+    )
+    result = RemoteRunner(transport=transport).parse("spec", "M")
+
+    assert result.outcome is Outcome.PARSE_ERROR
+    assert result.diagnostics[0].line == 3
+    assert result.diagnostics[0].module == "M"
+
+
+def test_a_parsed_result_carries_the_source_it_was_given():
+    """`result.source` is what renders the offending line back to the reader;
+    the service does not echo the spec, so the client has to supply it."""
+    transport = transport_returning(200, {"outcome": "ok", "ok": True})
+    source = "---- MODULE M ----\n====\n"
+    result = RemoteRunner(transport=transport).parse(source, "M")
+
+    assert result.source == source
+
+
 def test_truncated_trace_becomes_a_warning():
     payload = json.loads(json.dumps(VIOLATION))
     payload["trace"]["truncated"] = True
@@ -179,10 +233,13 @@ def test_non_json_body_is_reported_with_the_status():
         runner.check("spec", "M", "cfg")
 
 
-def test_parse_is_refused_with_a_pointer_to_check():
+def test_evaluating_an_expression_is_still_refused_with_somewhere_to_go():
+    """`parse` stopped raising in #67, `eval` did not. tlc2.REPL is a different
+    capability and the service still does not expose it, so the message has to
+    say what to do instead rather than only what is missing."""
     runner = RemoteRunner(transport=transport_returning(200, SUCCESS))
-    with pytest.raises(Unsupported, match="check"):
-        runner.parse("spec", "M")
+    with pytest.raises(Unsupported, match="INVARIANT"):
+        runner.eval("1 + 1")
 
 
 def test_raw_explains_why_it_is_empty():

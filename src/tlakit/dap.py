@@ -529,14 +529,17 @@ class DebugSession:
         if not self._require_stopped():
             return None
         assert self._client is not None
-        self._client.request("continue", threadId=0)
-        if not self._await_stop(timeout):
-            self._exhausted = True
-            return None
         try:
+            self._request("continue", threadId=0)
+            if not self._await_stop(timeout):
+                self._exhausted = True
+                return None
             return self._read_trace()
         except DebuggerTimeout:
-            # TLC announced the stop and then finished before answering for it.
+            # Anywhere along here TLC may simply have finished: while answering
+            # `continue`, between announcing a stop and answering for it, or
+            # mid-read. All of them are the state space running out, which is a
+            # normal end rather than something to propagate.
             self._exhausted = True
             return None
 
@@ -549,10 +552,10 @@ class DebugSession:
         if not self._require_stopped():
             return None
         assert self._client is not None
-        self._client.request("stepBack", threadId=0)
-        if not self._await_stop(timeout):
-            return None
         try:
+            self._request("stepBack", threadId=0)
+            if not self._await_stop(timeout):
+                return None
             return self._read_trace()
         except DebuggerTimeout:
             self._exhausted = True

@@ -30,6 +30,13 @@ class Outcome(str, Enum):
     STATE_SPACE_TOO_LARGE = "state_space_too_large"  # ERROR_STATESPACE_TOO_LARGE
     TIMEOUT = "timeout"                              # tlakit, not TLC
     ERROR = "error"
+    #: Apalache found no error *within the bound it was given*, which is a
+    #: strictly weaker claim than `OK`. TLC's `OK` means the reachable state
+    #: space was exhausted; a bounded symbolic check means only that no
+    #: counterexample exists up to `length` steps, and one may exist at
+    #: `length + 1`. They are collapsed at your peril: reporting a bounded
+    #: result as `OK` puts a falsehood in the one field callers branch on.
+    BOUNDED_OK = "bounded_ok"                        # Apalache, not TLC
 
 
 class Severity(str, Enum):

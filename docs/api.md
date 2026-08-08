@@ -104,6 +104,18 @@ notebook magics — which have no docstring to be generated from — see
         - itf_value
         - ApalacheNotFound
 
+## TLAPS: the proof system
+
+::: tlakit.tlaps
+    options:
+      members:
+        - TlapsRunner
+        - ProofResult
+        - Obligation
+        - parse_obligations
+        - find_tlapm
+        - TlapmNotFound
+
 ## Stepping under the TLA+ Debugger
 
 ::: tlakit.dap

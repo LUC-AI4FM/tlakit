@@ -21,7 +21,7 @@ from .jar import find_community_jar, find_tools_jar
 from .parse import parse_loop_start, parse_sany, parse_tlc
 from .result import CheckResult, Diagnostic, Outcome, RawOutput, Severity, Stats
 from .source import declared_variables
-from .trace import load_trace
+from .trace import load_trace, parse_text_trace
 
 TRACE_FILE = "trace.json"
 GRAPH_FILE = "graph.dot"
@@ -254,6 +254,12 @@ class CliRunner:
             raw, timed_out = self._run(argv, work, timeout)
             names = declared if declared is not None else declared_variables(source)
             trace = load_trace(work / TRACE_FILE, names)
+            if trace is None:
+                # The dump can be missing without TLC having failed outright
+                # (path not writable, or -- per issue #4 -- a foreign log read
+                # by a caller other than tlakit itself). TLC's own printed
+                # trace, when present, is just as good a source.
+                trace = parse_text_trace(raw.stdout, names)
             state_graph = None
             if graph:
                 dot = work / GRAPH_FILE

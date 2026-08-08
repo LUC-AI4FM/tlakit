@@ -201,6 +201,62 @@ def test_keyboard_interrupt_kills_the_child_and_propagates(runner, monkeypatch):
     assert "pid" in killed, "_terminate was not called on interrupt"
 
 
+# --- issue #4: text-mode trace fallback -----------------------------------
+# These do not need java or a real jar: `_run` is monkeypatched to return a
+# canned RawOutput, so what's under test is `check()`'s fallback wiring, not
+# TLC itself.
+
+
+def _fake_jar_runner(tmp_path):
+    fake = tmp_path / "tla2tools.jar"
+    fake.write_bytes(b"not a real jar")
+    return CliRunner(tools_jar=fake, community_jar=False)
+
+
+def test_check_falls_back_to_the_text_trace_when_the_json_dump_is_missing(
+    tmp_path, monkeypatch
+):
+    from tlakit.result import RawOutput
+
+    runner = _fake_jar_runner(tmp_path)
+    stdout = (Path(__file__).parent / "fixtures" / "tlc_invariant_violation.txt").read_text()
+    raw = RawOutput(["java"], 12, stdout, "")
+    monkeypatch.setattr(runner, "_run", lambda argv, cwd, timeout: (raw, False))
+
+    result = runner.check(SPIKE, "Spike", SPIKE_CFG)
+
+    assert result.outcome is Outcome.INVARIANT_VIOLATION
+    assert result.trace is not None
+    assert [s["x"] for s in result.trace.states] == [0, 1, 2, 3]
+
+
+def test_check_prefers_the_json_dump_when_both_are_present(tmp_path, monkeypatch):
+    from tlakit.result import RawOutput
+
+    runner = _fake_jar_runner(tmp_path)
+    # Text output disagrees with the JSON dump on purpose, so a test failure
+    # here would mean the fallback fired when it should not have.
+    stdout = (Path(__file__).parent / "fixtures" / "tlc_invariant_violation.txt").read_text()
+    raw = RawOutput(["java"], 12, stdout, "")
+
+    real_run = CliRunner._run
+
+    def fake_run(self, argv, cwd, timeout):
+        (cwd / "trace.json").write_text(
+            '{"vars": ["x"], "counterexample": {'
+            '"state": [[1, {"x": 99}], [2, {"x": 100}]], "action": []}}'
+        )
+        return raw, False
+
+    monkeypatch.setattr(CliRunner, "_run", fake_run)
+    try:
+        result = runner.check(SPIKE, "Spike", SPIKE_CFG)
+    finally:
+        monkeypatch.setattr(CliRunner, "_run", real_run)
+
+    assert [s["x"] for s in result.trace.states] == [99, 100]
+
+
 def test_unicode_in_a_spec_survives_a_round_trip(runner):
     """TLA+ allows Unicode operators, so every file and pipe must be UTF-8.
     Windows defaults to cp1252 and raised UnicodeDecodeError on the landing

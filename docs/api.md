@@ -78,6 +78,21 @@ notebook magics — which have no docstring to be generated from — see
         - parse_tla_value
         - TlaValueError
 
+## Symbols: completion and hover
+
+::: tlakit.symbols
+    options:
+      members:
+        - Symbol
+        - definitions
+        - extends
+        - symbols_in_scope
+        - session_scope
+        - standard_modules
+        - complete
+        - describe
+        - word_at
+
 ## Notebook rendering
 
 ::: tlakit.render

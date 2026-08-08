@@ -78,6 +78,29 @@ SPECIFICATION Spec
 INVARIANT Safety
 ```
 
+## Related work
+
+tlakit is the next evolution of Läufer and Thiruvathukal's *TLA+ for All: Model
+Checking in a Python Notebook* (TLA+ Community Event, 2025), which established
+that a Python notebook driving `tla2tools.jar` is a good way to teach and use
+TLA+. That result is the starting point here, not a competitor.
+
+What tlakit adds is a difference in kind rather than in polish: **TLA+ is the
+cell language.** `tlakit.kernel` is a Jupyter kernel, so a notebook is a TLA+
+artifact rather than a Python file holding TLA+ strings — TLA+ `language_info`,
+module cells that need no magic, and completion and hover answered *in TLA+*,
+from operators defined in the session and from the `.tla` files inside
+`tla2tools.jar` itself. A Python kernel cannot answer those: asked what `Su`
+completes to, the only honest answer it has is a Python one.
+
+The kernel is deliberately thin. All the behaviour lives in `tlakit.api` and
+`tlakit.magics`; the kernel subclasses `IPythonKernel` and adds routing,
+completion, and inspection on top. The previous from-scratch TLA+ kernel,
+[kelvich/tlaplus_jupyter](https://github.com/kelvich/tlaplus_jupyter), died of
+kernel and packaging maintenance rather than of anything TLA+-related — so the
+one thing this kernel must not do is own the protocol. If it rots, the magics
+keep working.
+
 ## Status
 
 M1 is complete: `CliRunner`, normalized results, `%%tla` / `%%tlc` magics,

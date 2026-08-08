@@ -7,18 +7,29 @@ which is what this exists to prevent.
 from __future__ import annotations
 
 import pathlib
-import tomllib
 
 import pytest
 
 import tlakit
+
+# tomllib is 3.11+, and this package supports 3.10. Imported here rather than at
+# module scope because an ImportError at import time fails *collection* -- the
+# whole module errors out instead of skipping, which is how this first broke CI
+# on every 3.10 job while 3.11 through 3.13 passed.
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - depends on interpreter
+    tomllib = None  # type: ignore[assignment]
 
 PYPROJECT = pathlib.Path(__file__).resolve().parent.parent / "pyproject.toml"
 IN_SOURCE_TREE = PYPROJECT.is_file()
 
 
 @pytest.mark.skipif(not IN_SOURCE_TREE, reason="no pyproject.toml; installed package")
+@pytest.mark.skipif(tomllib is None, reason="tomllib is 3.11+")
 def test_dunder_version_matches_pyproject():
+    """Nothing is lost by skipping on 3.10: this compares file contents, which
+    do not vary by interpreter, so any one Python proves it."""
     declared = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]["version"]
     assert tlakit.__version__ == declared
 

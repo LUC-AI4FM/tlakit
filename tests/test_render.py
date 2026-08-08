@@ -226,3 +226,32 @@ def test_trace_view_widget_js_renders_values_as_text_not_markup():
     assert "table.innerHTML" not in esm
     assert "td.textContent = JSON.stringify(step.state[name])" in esm
     assert "th.textContent = name" in esm
+
+
+def test_deadlock_explains_that_termination_looks_the_same():
+    """A terminating spec trips the deadlock check; the banner has to say so.
+
+    Without this the reader of a correct, finite algorithm goes hunting for a
+    concurrency bug that does not exist -- and the reader whose deadlock is
+    real learns nothing they did not already know from the word "deadlock".
+    """
+    r = CheckResult(Outcome.DEADLOCK, [], None, Stats(), RAW)
+    html = result_html(r)
+    assert "Deadlock reached." in html
+    assert "CHECK_DEADLOCK FALSE" in html
+    assert "check_deadlock=False" in html
+
+
+def test_a_clean_run_carries_no_deadlock_hint():
+    html = result_html(CheckResult(Outcome.OK, [], None, Stats(), RAW))
+    assert "CHECK_DEADLOCK" not in html
+
+
+def test_module_defined_names_the_module_and_its_variables():
+    from tlakit.magics import ModuleDefined
+    from tlakit.render import module_defined_html
+
+    html = module_defined_html(ModuleDefined("Widget", ["x", "y"]))
+    assert "Widget" in html
+    assert "x, y" in html
+    assert "Not parsed yet" in html

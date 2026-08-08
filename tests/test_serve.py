@@ -1,5 +1,6 @@
 """Issue #39: the public service must expose exactly one capability."""
 import shutil
+import sys
 
 import pytest
 
@@ -292,6 +293,11 @@ def test_an_unreadable_key_file_locks_everything_out(monkeypatch, tmp_path):
         assert exc.value.status_code == 401
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="chmod(0) does not remove owner read access on Windows, so the "
+    "condition under test cannot be created; the check itself is portable",
+)
 def test_startup_refuses_an_unreadable_jar(tmp_path):
     """An unreadable jar makes java fail with ClassNotFoundException, which
     reaches the client as a bare 'exit code 1'. Catch it once, at startup."""

@@ -1,15 +1,20 @@
-"""Parse TLC's `-dump dot` state graph.
+"""Build TLC's state graph, from a live NDJSON stream or from a DOT dump.
 
-TLC writes the reachable state graph as Graphviz DOT. Node ids are state
-fingerprints (signed 64-bit, so often negative), labels hold the variable
-assignments in TLA+ conjunction form, and with `actionlabels` each edge carries
-the action that produced it.
+The graph normally arrives one record at a time, while TLC is still running,
+from the `IStateWriter` in `tlakit/java/` -- `GraphBuilder` is what turns that
+stream into a `StateGraph`. `parse_dot` reads TLC's own `-dump dot` file
+instead, which is the same graph after the fact; it stays for machines with no
+JDK to compile the writer, and for reading a dump tlakit did not produce.
+
+Either way node ids are state fingerprints (signed 64-bit, so often negative)
+and variable values are TLA+ source text.
 
 Nothing here renders anything. Layout is the client's job; this module only
-turns TLC's text into a graph.
+turns TLC's output into a graph.
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -103,6 +108,108 @@ class StateGraph:
             "variables": self.variables,
             "truncated": self.truncated,
         }
+
+
+class GraphBuilder:
+    """Assemble a `StateGraph` from the writer's NDJSON, record by record.
+
+    Records may be fed while TLC is still writing them, so the builder never
+    assumes it has seen the whole stream: `graph()` is a valid answer at any
+    point, and a run killed on a budget is simply one that stopped feeding.
+
+    `max_nodes` truncates rather than refusing, as `parse_dot` does -- but here
+    the states past the limit are never held at all, rather than being written
+    to disk and dropped afterwards.
+    """
+
+    def __init__(self, max_nodes: int | None = None) -> None:
+        self._max_nodes = max_nodes
+        self._nodes: dict[str, Node] = {}
+        self._edges: list[Edge] = []
+        self._truncated = False
+
+    def feed(self, line: str) -> None:
+        """Consume one NDJSON record.
+
+        A line that is not a complete JSON object is ignored rather than
+        raising. The stream is read from a file a JVM may be killed in the
+        middle of writing, and a torn last line is not a reason to throw away
+        every state before it.
+        """
+        line = line.strip()
+        if not line:
+            return
+        try:
+            record = json.loads(line)
+        except ValueError:
+            return
+        if not isinstance(record, dict):
+            return
+
+        kind = record.get("t")
+        if kind == "state":
+            self._add_state(record)
+        elif kind == "edge":
+            self._add_edge(record)
+
+    def _add_state(self, record: dict[str, Any]) -> None:
+        node_id = record.get("id")
+        if not isinstance(node_id, str) or node_id in self._nodes:
+            # The writer emits a state once, when it is first reached, so a
+            # repeat means a recovered run -- first one wins either way.
+            return
+        if self._max_nodes is not None and len(self._nodes) >= self._max_nodes:
+            self._truncated = True
+            return
+        variables = record.get("vars")
+        self._nodes[node_id] = Node(
+            id=node_id,
+            variables={
+                str(k): str(v) for k, v in variables.items()
+            } if isinstance(variables, dict) else {},
+            initial=bool(record.get("initial")),
+        )
+
+    def _add_edge(self, record: dict[str, Any]) -> None:
+        source, target = record.get("from"), record.get("to")
+        if not isinstance(source, str) or not isinstance(target, str):
+            return
+        if self._truncated and not (source in self._nodes and target in self._nodes):
+            # Past the node limit nothing new is recorded, so an endpoint that
+            # is unknown now will stay unknown. Holding the edge would only
+            # grow with a graph the caller asked not to have.
+            return
+        self._edges.append(
+            Edge(source=source, target=target, action=str(record.get("action", "")))
+        )
+
+    def graph(self) -> StateGraph:
+        """The graph as it stands. Safe to call mid-stream.
+
+        Edges are filtered to the nodes actually held, so a truncated graph
+        never hands a client a dangling reference -- the same guarantee
+        `parse_dot` makes. An edge can also arrive before its target's own
+        record when TLC's workers interleave, which is the other reason this
+        filter is at the end rather than at `feed`.
+        """
+        known = set(self._nodes)
+        return StateGraph(
+            nodes=list(self._nodes.values()),
+            edges=[
+                edge
+                for edge in self._edges
+                if edge.source in known and edge.target in known
+            ],
+            truncated=self._truncated,
+        )
+
+
+def parse_ndjson(text: str, max_nodes: int | None = None) -> StateGraph:
+    """Build a StateGraph from a whole NDJSON stream at once."""
+    builder = GraphBuilder(max_nodes)
+    for line in text.splitlines():
+        builder.feed(line)
+    return builder.graph()
 
 
 def parse_dot(text: str, max_nodes: int | None = None) -> StateGraph:

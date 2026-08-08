@@ -96,11 +96,17 @@ jobs:
       - name: Confirm the sdist can rebuild the wheel
         # A sdist that cannot rebuild is not a source distribution. This is how
         # an over-eager exclude gets caught.
+        #
+        # The sdist is unpacked first because `python -m build` takes a source
+        # *directory*, not a tarball -- handing it the .tar.gz fails with
+        # "Source ... is not a directory". Building from the extracted tree is
+        # also the stronger check: it proves the archive alone is sufficient.
         run: |
           set -euo pipefail
-          python -m pip install --upgrade build
-          mkdir -p /tmp/fromsdist
-          python -m build --wheel --outdir /tmp/fromsdist "$(echo dist/*.tar.gz)"
+          mkdir -p /tmp/extracted /tmp/fromsdist
+          tar xzf dist/*.tar.gz -C /tmp/extracted
+          cd /tmp/extracted/*/
+          python -m build --wheel --outdir /tmp/fromsdist
           ls -l /tmp/fromsdist
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -258,3 +258,30 @@ def test_check_is_a_post():
     transport = transport_returning(200, SUCCESS)
     RemoteRunner(transport=transport).check("spec", "M", "cfg")
     assert transport.sent["method"] == "POST"
+
+
+def test_eval_is_refused_with_an_explanation_not_an_attributeerror():
+    """`%tla_eval` reaches for `runner.eval`, which the service has no route for.
+
+    Absent the method the browser notebook raises AttributeError naming an
+    internal class, which tells the reader nothing. Refusing on purpose is the
+    same contract every other unsupported option here follows.
+    """
+    with pytest.raises(Unsupported, match="tlc2.REPL"):
+        RemoteRunner().eval("1 + 1")
+
+
+def test_the_magic_surfaces_that_refusal(monkeypatch):
+    """End of the chain: the magic must not turn it into something opaque."""
+    IPython = pytest.importorskip("IPython")
+    from IPython.core.interactiveshell import InteractiveShell
+
+    InteractiveShell.clear_instance()
+    shell = InteractiveShell.instance()
+    shell.run_line_magic("load_ext", "tlakit")
+    monkeypatch.setattr(api, "_override", RemoteRunner())
+    try:
+        with pytest.raises(Unsupported, match="INVARIANT"):
+            shell.run_line_magic("tla_eval", "1 + 1")
+    finally:
+        InteractiveShell.clear_instance()

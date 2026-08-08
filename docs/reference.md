@@ -32,6 +32,18 @@ That distinction is the whole point of the result objects: a spec violating its
 invariant is the tool working, and code that wraps every check in `try` to find
 that out has been made worse by the library.
 
+One outcome surprises everybody once. A specification meant to *terminate* ends
+in a state with no successor, and so does one that is stuck — TLC cannot tell
+them apart, so it reports `Outcome.DEADLOCK` for both. If yours is supposed to
+finish, say so:
+
+```python
+result = spec.check(invariants=["Inv"], check_deadlock=False)
+```
+
+or `CHECK_DEADLOCK FALSE` in a raw config. Passing both is an error rather than
+a silent preference for one.
+
 ---
 
 ## Environment variables
@@ -77,8 +89,14 @@ Define a TLA+ module for the session. The cell body is the module source.
 
 `ModuleName` may be omitted when the cell contains a `---- MODULE Name ----`
 header, which it normally does. Returns the `CheckResult` from a SANY parse so
-a syntax error shows up in the cell that caused it; `--no-parse` skips that and
-returns nothing.
+a syntax error shows up in the cell that caused it.
+
+`--no-parse` skips the parse, and so does any runner without a SANY to call —
+the remote one, which is the only runner in a browser. Both return a
+`ModuleDefined` naming the module and its variables, rather than nothing at
+all: the cell still did something, and in a browser there is no filesystem to
+go and check. A syntax error then surfaces from the first `%%tlc`, since TLC
+parses before it explores.
 
 Modules accumulate in `tlakit.magics.MODULES` for the rest of the session,
 which is how `%%tlc` and `%tla_eval` find them.
@@ -101,6 +119,10 @@ earlier with `%%tla`.
 Constant-level only — no `VARIABLE`, no primed expressions — because that is
 what the REPL itself is. An evaluation error raises `TlaMagicError` with TLC's
 own message rather than returning a sentinel.
+
+Local only. The public service exposes checking and no REPL, so in a browser
+this raises `Unsupported`; express the value as an operator and check it as an
+`INVARIANT` instead.
 
 ---
 

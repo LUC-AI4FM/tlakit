@@ -128,6 +128,10 @@ def default_transport() -> Callable[[str, str, bytes | None, float], tuple[int, 
 class RemoteRunner:
     """A `CliRunner`-shaped client for the public checking service."""
 
+    #: The service exposes checking only, so callers that parse merely to give
+    #: fast feedback -- `%%tla` above all -- can skip it instead of failing.
+    can_parse = False
+
     endpoint: str = DEFAULT_ENDPOINT
     timeout: float = DEFAULT_TIMEOUT
     #: Injectable so tests never touch the network.
@@ -172,6 +176,27 @@ class RemoteRunner:
             "the remote runner cannot parse; SANY is not exposed by the "
             "service. Check the spec instead -- TLC parses before it explores, "
             "so syntax errors surface from check()."
+        )
+
+    def eval(
+        self,
+        expr: str,
+        modules: dict[str, str] | None = None,
+        timeout: float | None = None,
+    ):
+        """Not available remotely.
+
+        `%tla_eval` drives `tlc2.REPL`, which the service does not expose --
+        it accepts a spec and a config and nothing else. Without this the
+        magic reaches for a method that is simply absent and the browser
+        notebook gets `AttributeError: 'RemoteRunner' object has no attribute
+        'eval'`, which tells the reader nothing about what to do instead.
+        """
+        raise Unsupported(
+            "the remote runner cannot evaluate expressions; tlc2.REPL is not "
+            "exposed by the service. Express the value as an operator in a "
+            "module and check it as an INVARIANT, or install tlakit locally "
+            "with a JVM for the REPL."
         )
 
     def check(

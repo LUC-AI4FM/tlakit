@@ -106,3 +106,31 @@ def test_tla_eval_raises_with_diagnostic_detail_on_failure(ip, monkeypatch):
 
     with pytest.raises(TlaMagicError, match="Unknown operator"):
         ip.run_line_magic("tla_eval", "nope")
+
+
+def test_tla_cell_skips_parsing_when_the_runner_has_no_parser(ip, monkeypatch):
+    """The browser path: `%%tla` must define the module, not raise.
+
+    The remote service exposes checking only, so a magic that parses for speed
+    has to fall back rather than turn every spec cell into a traceback -- which
+    is what the published browser notebook did.
+    """
+    from tlakit import api
+    from tlakit.magics import ModuleDefined
+    from tlakit.remote import RemoteRunner
+
+    monkeypatch.setattr(api, "_override", RemoteRunner())
+    result = ip.run_cell_magic("tla", "Widget", WIDGET)
+
+    assert isinstance(result, ModuleDefined)
+    assert result.name == "Widget"
+    assert result.variables == ["x"]
+    assert MODULES["Widget"] == WIDGET
+
+
+def test_no_parse_still_reports_the_module(ip):
+    from tlakit.magics import ModuleDefined
+
+    result = ip.run_cell_magic("tla", "Widget --no-parse", WIDGET)
+    assert isinstance(result, ModuleDefined)
+    assert result.variables == ["x"]

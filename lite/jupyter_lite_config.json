@@ -12,7 +12,7 @@
   },
   "PipliteAddon": {
     "piplite_urls": [
-      "./wheels/tlakit-0.1.0.dev0-py3-none-any.whl"
+      "./wheels/tlakit-0.0.1-py3-none-any.whl"
     ]
   }
 }

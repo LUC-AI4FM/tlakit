@@ -292,6 +292,9 @@ def _terminate(proc: subprocess.Popen) -> tuple[str, str]:
 class CliRunner:
     """Invoke the TLA+ tools via `java -cp tla2tools.jar`."""
 
+    #: SANY is in the jar, so a local runner can parse without checking.
+    can_parse = True
+
     def __init__(
         self,
         tools_jar: Path | None = None,

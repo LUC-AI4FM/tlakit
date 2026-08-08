@@ -33,16 +33,33 @@ class Outcome(str, Enum):
 
 
 class Severity(str, Enum):
+    """Whether a `Diagnostic` stopped the run or merely reported on it."""
+
+    #: The run could not produce an answer, or produced a failing one.
     ERROR = "error"
+    #: TLC finished, but said something worth surfacing on the way.
     WARNING = "warning"
 
 
 @dataclass(frozen=True)
 class Diagnostic:
+    """One message from SANY or TLC, with its source location when it has one.
+
+    `str(diagnostic)` renders it as `module:line:column: message`, dropping
+    whatever parts are unknown. That form is what `check_source` callers feed
+    back to a model, so it stays stable.
+    """
+
+    #: Whether this stopped the run. See `CheckResult.errors`.
     severity: Severity
+    #: The text, with TLC's own boilerplate framing removed.
     message: str
+    #: The module the message points into, when TLC named one. Not always the
+    #: module being checked -- an error can surface inside an EXTENDed one.
     module: str | None = None
+    #: 1-based line, matching TLC's own numbering and every editor's.
     line: int | None = None
+    #: 1-based column. None whenever `line` is None.
     column: int | None = None
 
     def __str__(self) -> str:
@@ -72,15 +89,28 @@ class Coverage:
 
     @property
     def unused(self) -> bool:
+        """True when TLC never evaluated this action to true."""
         return self.total == 0
 
 
 @dataclass(frozen=True)
 class Stats:
+    """What TLC reported about the search itself.
+
+    Every count is None when TLC did not report it -- a run that failed to
+    parse never searched, so `generated` is genuinely unknown rather than 0.
+    """
+
+    #: States TLC generated in total, including ones it had already seen.
     generated: int | None = None
+    #: Distinct states found: the size of the reachable state space explored.
     distinct: int | None = None
+    #: States still on the queue when TLC stopped. Non-zero after a violation
+    #: (TLC halts on the first one) or a timeout; 0 after an exhaustive run.
     queue_left: int | None = None
+    #: Depth of the deepest behaviour explored, in states.
     depth: int | None = None
+    #: Wall-clock time for the run, measured by tlakit rather than by TLC.
     duration_ms: int | None = None
     #: Per-action coverage, keyed by action name. Populated only when the run
     #: asked for it -- TLC gathers none by default, so empty means "not
@@ -95,17 +125,42 @@ class Stats:
 
 @dataclass(frozen=True)
 class Action:
+    """The disjunct of `Next` that produced one step of a trace.
+
+    The location spans the action's whole definition, which is what makes
+    "highlight the transition that got us here" possible in a notebook.
+    """
+
+    #: The action's name, e.g. `Next` or the disjunct TLC attributed the step
+    #: to. `tlakit.trace.UNKNOWN_ACTION` when TLC named none.
     name: str
+    #: The module the action is defined in, when known.
     module: str | None = None
+    #: 1-based line where the definition starts.
     begin_line: int | None = None
+    #: 1-based column where the definition starts.
     begin_column: int | None = None
+    #: 1-based line where the definition ends.
     end_line: int | None = None
+    #: 1-based column where the definition ends.
     end_column: int | None = None
 
 
 @dataclass(frozen=True)
 class Trace:
+    """A counterexample: the states TLC walked to reach a violation.
+
+    Indexable and iterable over states (`trace[0]`, `len(trace)`,
+    `for state in trace`). `actions` is one shorter than `states` -- the
+    initial state was not produced by an action -- and `__post_init__`
+    enforces that rather than letting the two drift apart.
+    """
+
+    #: One dict per state: variable name -> value, already decoded from TLC's
+    #: JSON. TLA+ records become dicts; sequences and sets both become lists.
     states: list[dict[str, Any]]
+    #: The action producing each state after the first, so `actions[i - 1]`
+    #: is what led to `states[i]`.
     actions: list[Action] = field(default_factory=list)
     #: TLC's own state identifiers, parallel to `states`. Empty when the trace
     #: was built by hand rather than loaded from TLC.
@@ -269,18 +324,43 @@ def flatten_state(state: dict[str, Any], separator: str = ".") -> dict[str, Any]
 
 @dataclass(frozen=True)
 class RawOutput:
+    """Exactly what the subprocess was asked and exactly what it said.
+
+    The escape hatch for anything tlakit has not normalized. It is also the
+    one field carrying machine-specific detail -- absolute temp paths, the
+    java argv -- so it is what `tlakit.serve.redact` scrubs before a response
+    leaves the process, and what a golden file should never pin.
+    """
+
+    #: The full command line, as a list. Never a shell string.
     argv: list[str]
+    #: The process exit code, or None if it was killed on timeout.
     exit_code: int | None
+    #: Standard output, verbatim. TLC reports essentially everything here.
     stdout: str
+    #: Standard error, verbatim. Usually JVM noise rather than TLC's own.
     stderr: str
 
 
 @dataclass(frozen=True)
 class CheckResult:
+    """What one `parse` or `check` produced.
+
+    A failing check is a normal result, not an exception: inspect `outcome`,
+    or `ok` for the boolean. Only things that stop a run from happening at all
+    -- no Java, no jar -- raise.
+    """
+
+    #: How the run ended. The single field worth branching on.
     outcome: Outcome
+    #: Every message from SANY or TLC, warnings included. `errors` filters.
     diagnostics: list[Diagnostic]
+    #: The counterexample, when the outcome has one. None for `OK`, and also
+    #: for failures that produce no behaviour (a parse error, say).
     trace: Trace | None
+    #: Search statistics. Present but empty-valued when nothing was searched.
     stats: Stats
+    #: The underlying subprocess invocation and its unparsed output.
     raw: RawOutput
     #: The module source, when the runner knows it. Lets the notebook view
     #: point at the offending line.
@@ -294,10 +374,13 @@ class CheckResult:
 
     @property
     def ok(self) -> bool:
+        """True only for `Outcome.OK`. Every other outcome, including
+        `TIMEOUT`, is a run that did not clear the spec."""
         return self.outcome is Outcome.OK
 
     @property
     def errors(self) -> list[Diagnostic]:
+        """The error-severity diagnostics, dropping warnings."""
         return [d for d in self.diagnostics if d.severity is Severity.ERROR]
 
     def _repr_html_(self) -> str:

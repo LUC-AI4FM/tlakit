@@ -299,12 +299,28 @@ function render({ model, el }) {
     }
 
     const changed = new Set(step.changed || []);
-    const rows = variables.map((name) => {
-      const value = JSON.stringify(step.state[name]);
-      const cls = changed.has(name) ? ' class="tlakit-changed"' : "";
-      return `<tr><th>${name}</th><td${cls}>${value}</td></tr>`;
-    });
-    table.innerHTML = rows.join("");
+    // Build rows as DOM nodes, not an HTML string: variable names and state
+    // values are untrusted (LLM-generated specs, or -- via tlakit.serve --
+    // arbitrary HTTP callers), so textContent is what keeps them inert.
+    // JSON.stringify escapes quotes/backslashes but not `<`/`>`/`&`, so
+    // interpolating it into an HTML template and assigning via innerHTML
+    // would let a state value like "<img src=x onerror=alert(1)>" execute.
+    while (table.firstChild) {
+      table.removeChild(table.firstChild);
+    }
+    for (const name of variables) {
+      const row = document.createElement("tr");
+      const th = document.createElement("th");
+      th.textContent = name;
+      const td = document.createElement("td");
+      if (changed.has(name)) {
+        td.className = "tlakit-changed";
+      }
+      td.textContent = JSON.stringify(step.state[name]);
+      row.appendChild(th);
+      row.appendChild(td);
+      table.appendChild(row);
+    }
   }
 
   slider.addEventListener("input", () => {

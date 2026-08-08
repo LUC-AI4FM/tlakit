@@ -186,3 +186,43 @@ def test_trace_view_degrades_gracefully_without_anywidget(monkeypatch):
     finally:
         monkeypatch.delitem(sys.modules, "tlakit.render", raising=False)
         importlib.import_module("tlakit.render")
+
+
+def test_trace_view_widget_js_renders_values_as_text_not_markup():
+    """Regression test for a reachable XSS.
+
+    State values and variable names are untrusted -- tlakit's README frames
+    LLM-generated specs as a use case, and `tlakit.serve` accepts spec text
+    from arbitrary HTTP callers -- so a value like the payload below is
+    plausible input, not a contrived one. The widget's `_esm` used to build
+    table rows by interpolating raw values into an HTML template string and
+    assign it wholesale via `table.innerHTML`. `JSON.stringify` escapes
+    quotes/backslashes but not `<`, `>`, or `&`, so that payload would
+    execute as markup in the Jupyter/Colab/VSCode frontend.
+
+    The fix builds each row with `document.createElement` and sets cell
+    content through `.textContent`, which cannot execute markup regardless
+    of the string it holds. There's no Node/browser harness in this repo to
+    run the widget's JS directly (pytest only), so this test pins the fix at
+    two levels: the vulnerable sink (`table.innerHTML` fed by a template
+    string) is gone from the source, the safe sink (`.textContent`) is
+    present, and the Python side hands the payload to the widget model
+    unescaped -- escaping is the JS layer's job here, not Python's, since
+    pre-escaping in Python would double-escape when the JS does its own
+    `.textContent` assignment.
+    """
+    import tlakit.render as render_module
+
+    payload = "<img src=x onerror=alert(1)>"
+    trace = Trace(
+        states=[{payload: 0}, {payload: 1}], actions=[Action("Next", "M", 1, 1)]
+    )
+
+    view = TraceView(trace)
+    assert view.steps[1]["state"][payload] == 1
+    assert payload in view.variables
+
+    esm = render_module._TRACE_VIEW_ESM
+    assert "table.innerHTML" not in esm
+    assert "td.textContent = JSON.stringify(step.state[name])" in esm
+    assert "th.textContent = name" in esm

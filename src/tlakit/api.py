@@ -45,6 +45,30 @@ EXTENDS {module}, TLC, IOUtils
 #: which matters now that other projects embed tlakit alongside their own code.
 _runners: dict[tuple[Path, Path | None], CliRunner] = {}
 
+#: Set by `use_remote`. A process-wide override is the right scope here: it
+#: exists for environments with no Java at all, where every runner has to be
+#: remote, and it keeps `%%tlc` and `Spec.check()` working untouched.
+_override: Any = None
+
+
+def use_remote(endpoint: str | None = None, **kwargs: Any) -> Any:
+    """Send every check to a remote service instead of a local JVM.
+
+    For Pyodide and other places with no Java. Returns the runner so a caller
+    can inspect `.health()`.
+    """
+    from .remote import DEFAULT_ENDPOINT, RemoteRunner
+
+    global _override
+    _override = RemoteRunner(endpoint=endpoint or DEFAULT_ENDPOINT, **kwargs)
+    return _override
+
+
+def use_local() -> None:
+    """Undo `use_remote`."""
+    global _override
+    _override = None
+
 
 def default_runner(
     tools_jar: Path | None = None, community_jar: Path | None = None
@@ -55,6 +79,8 @@ def default_runner(
     every call, so changing TLAKIT_TLA2TOOLS takes effect immediately instead
     of being masked by a cached runner.
     """
+    if _override is not None:
+        return _override
     from .jar import find_community_jar, find_tools_jar
 
     key = (find_tools_jar(tools_jar), find_community_jar(community_jar))

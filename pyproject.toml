@@ -1,12 +1,35 @@
 [project]
 name = "tlakit"
-version = "0.1.0.dev0"
+version = "0.0.1"
 description = "A Python and notebook client for the TLA+ toolchain"
-readme = "README.md"
+readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Eric Spencer" }]
+keywords = ["tla+", "tlaplus", "tlc", "model-checking", "formal-methods", "jupyter"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Framework :: Jupyter",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
+]
 dependencies = ["platformdirs>=4.0"]
+
+[project.urls]
+Homepage = "https://github.com/LUC-AI4FM/tlakit"
+Repository = "https://github.com/LUC-AI4FM/tlakit"
+Issues = "https://github.com/LUC-AI4FM/tlakit/issues"
+"Try it in a browser" = "https://tlakit.pages.dev"
 
 [project.optional-dependencies]
 notebook = ["ipython>=8.0"]
@@ -22,6 +45,29 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/tlakit"]
 artifacts = ["src/tlakit/serve/static/*.html"]
+
+[tool.hatch.build.targets.sdist]
+# The sdist is "everything needed to rebuild and test", not the working tree.
+# Without these it swallows the JupyterLite build venv and its 64 MB output --
+# hatchling refuses outright on the venv, which is how this was noticed.
+include = [
+    "/src",
+    "/tests",
+    "/examples",
+    "/docs",
+    "/lite/files",
+    "/lite/serve.py",
+    "/lite/requirements-build.txt",
+    "/lite/README.md",
+    "/README.md",
+    "/SECURITY.md",
+    "/pyproject.toml",
+]
+exclude = [
+    "**/__pycache__",
+    "**/*.pyc",
+    "/lite/wheels",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

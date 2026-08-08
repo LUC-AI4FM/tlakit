@@ -8,6 +8,7 @@ exit 255 (verified 2026-08-07).
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -25,6 +26,51 @@ from .trace import load_trace, parse_text_trace
 
 TRACE_FILE = "trace.json"
 GRAPH_FILE = "graph.dot"
+
+# A PlusCal source names its own translator with `--algorithm Name` or
+# `--fair algorithm Name` inside a `(* ... *)` comment; nothing else in a
+# spec legitimately contains that token, so a substring search is enough --
+# no need to parse the comment structure to find it.
+_PLUSCAL_ALGORITHM = re.compile(r"--(?:fair\s+)?algorithm\b")
+
+# pcal.trans reports a failure as (verified 2026-08-07, pcal.trans 1.12):
+#
+#     Unrecoverable error:
+#      -- Expected "if" but found "algorithm"
+#         line 9, column 5.
+#
+# The location line is not always present (a missing algorithm block, for
+# example, has none).
+_PLUSCAL_ERROR = re.compile(
+    r"Unrecoverable error:\s*\n\s*--\s*(?P<message>[^\n]+)"
+    r"(?:\n\s*line (?P<line>\d+), column (?P<column>\d+)\.)?"
+)
+
+
+def _is_pluscal(source: str) -> bool:
+    """Whether `source` embeds a PlusCal algorithm block."""
+    return _PLUSCAL_ALGORITHM.search(source) is not None
+
+
+def _pluscal_diagnostics(stdout: str, exit_code: int | None) -> list[Diagnostic]:
+    diags = [
+        Diagnostic(
+            Severity.ERROR,
+            f"PlusCal translation failed: {m.group('message').strip()}",
+            line=int(m.group("line")) if m.group("line") else None,
+            column=int(m.group("column")) if m.group("column") else None,
+        )
+        for m in _PLUSCAL_ERROR.finditer(stdout)
+    ]
+    if diags:
+        return diags
+    return [
+        Diagnostic(
+            Severity.ERROR,
+            f"PlusCal translation failed: pcal.trans exited with code "
+            f"{exit_code}; see result.raw for output.",
+        )
+    ]
 
 
 class JavaNotFound(FileNotFoundError):
@@ -166,11 +212,58 @@ class CliRunner:
             with _LIVE_LOCK:
                 _LIVE.discard(proc)
 
+    def _translate_pluscal(self, work: Path, module: str) -> RawOutput:
+        """Run `pcal.trans` over `<module>.tla`, which it rewrites in place.
+
+        `-nocfg` keeps the translator from writing a .cfg: callers manage
+        their own, and `check()` writes one before this ever runs.
+        """
+        argv = [
+            _java(),
+            "-cp",
+            self._classpath(),
+            "pcal.trans",
+            "-nocfg",
+            f"{module}.tla",
+        ]
+        raw, _ = self._run(argv, work, timeout=None)
+        return raw
+
+    def _prepare_source(
+        self, work: Path, module: str, source: str
+    ) -> tuple[str, CheckResult | None]:
+        """Write `source` as `<module>.tla`, translating PlusCal first if present.
+
+        pcal.trans ships inside tla2tools.jar, which every caller already
+        requires -- no new dependency. Returns the text SANY/TLC will actually
+        see (unchanged when there is no PlusCal block) and, on translator
+        failure, a `CheckResult` diagnosing it that the caller should return
+        immediately without ever invoking SANY or TLC.
+        """
+        (work / f"{module}.tla").write_text(source, encoding="utf-8")
+        if not _is_pluscal(source):
+            return source, None
+        raw = self._translate_pluscal(work, module)
+        if raw.exit_code != 0:
+            diagnostics = _pluscal_diagnostics(raw.stdout, raw.exit_code)
+            failure = CheckResult(
+                Outcome.PARSE_ERROR, diagnostics, None, Stats(), raw, source=source,
+            )
+            return source, failure
+        translated = (work / f"{module}.tla").read_text(encoding="utf-8")
+        return translated, None
+
     def parse(self, source: str, module: str) -> CheckResult:
-        """Syntax- and level-check a module with SANY."""
+        """Syntax- and level-check a module with SANY.
+
+        A PlusCal algorithm block is translated first -- SANY has no idea
+        what one is and reports a syntax error that never mentions PlusCal.
+        """
         with tempfile.TemporaryDirectory(prefix="tlakit-") as tmp:
             work = Path(tmp)
-            (work / f"{module}.tla").write_text(source, encoding="utf-8")
+            source, failure = self._prepare_source(work, module, source)
+            if failure is not None:
+                return failure
             argv = [
                 _java(),
                 "-cp",
@@ -225,11 +318,18 @@ class CliRunner:
         module inherits its variables through EXTENDS and declares none of its
         own, so reading them from its text would find nothing and every alias
         field would be mistaken for state.
+
+        A PlusCal algorithm block in `source` is translated before TLC ever
+        sees it; `declared` (when not given explicitly) is then read from the
+        *translated* text, which is where PlusCal's own `VARIABLES` clause and
+        `pc` bookkeeping variable actually live.
         """
         frames: list[str] = []
         with tempfile.TemporaryDirectory(prefix="tlakit-") as tmp:
             work = Path(tmp)
-            (work / f"{module}.tla").write_text(source, encoding="utf-8")
+            source, failure = self._prepare_source(work, module, source)
+            if failure is not None:
+                return failure
             (work / f"{module}.cfg").write_text(config, encoding="utf-8")
             for name, text in (extra_modules or {}).items():
                 (work / f"{name}.tla").write_text(text, encoding="utf-8")

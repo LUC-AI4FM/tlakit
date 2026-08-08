@@ -257,6 +257,174 @@ def test_check_prefers_the_json_dump_when_both_are_present(tmp_path, monkeypatch
     assert [s["x"] for s in result.trace.states] == [99, 100]
 
 
+# --- issue #18: PlusCal translation ----------------------------------------
+
+PLUSCAL_SOURCE = """---- MODULE Euclid ----
+EXTENDS Naturals, TLC
+
+(*--algorithm euclid
+variables x = 10, y = 4;
+begin
+  while x /= y do
+    if x > y then
+      x := x - y;
+    else
+      y := y - x;
+    end if;
+  end while;
+end algorithm; *)
+====
+"""
+
+PLUSCAL_CFG = "SPECIFICATION Spec\n"
+
+PLUSCAL_BROKEN = """---- MODULE Broken3 ----
+EXTENDS Naturals
+
+(*--algorithm broken3
+variables x = 10;
+begin
+  if x > 0 then
+    x := x - 1;
+end algorithm; *)
+====
+"""
+
+
+def test_is_pluscal_detects_an_algorithm_block():
+    from tlakit.cli import _is_pluscal
+
+    assert _is_pluscal(PLUSCAL_SOURCE) is True
+    assert _is_pluscal(SPIKE) is False
+
+
+def test_is_pluscal_detects_fair_algorithm():
+    from tlakit.cli import _is_pluscal
+
+    assert _is_pluscal("(*--fair algorithm Foo\nbegin skip; end algorithm; *)") is True
+
+
+def test_pluscal_diagnostics_names_pluscal_and_carries_location():
+    from tlakit.cli import _pluscal_diagnostics
+
+    stdout = (
+        'pcal.trans Version 1.12 of 01 July 2024\n\n'
+        'Unrecoverable error:\n'
+        ' -- Expected "if" but found "algorithm"\n'
+        '    line 9, column 5.\n\n'
+    )
+    diags = _pluscal_diagnostics(stdout, 255)
+    assert len(diags) == 1
+    assert "PlusCal" in diags[0].message
+    assert diags[0].line == 9
+    assert diags[0].column == 5
+
+
+def test_pluscal_diagnostics_falls_back_when_unrecognized(tmp_path):
+    from tlakit.cli import _pluscal_diagnostics
+
+    diags = _pluscal_diagnostics("something unexpected", 255)
+    assert len(diags) == 1
+    assert "PlusCal" in diags[0].message
+    assert "255" in diags[0].message
+
+
+def test_check_translates_pluscal_before_running_tlc(tmp_path, monkeypatch):
+    """No jar needed: `_run` is faked, but it stands in for both pcal.trans
+    and TLC, so this proves the translated .tla file -- not the original --
+    is what TLC's argv ends up pointing at."""
+    from tlakit.result import RawOutput
+
+    runner = _fake_jar_runner(tmp_path)
+    calls = []
+
+    def fake_run(self, argv, cwd, timeout):
+        calls.append(argv)
+        if "pcal.trans" in argv:
+            # Simulate the translator inserting VARIABLES + Spec, as the real
+            # tool does between BEGIN/END TRANSLATION markers.
+            tla_path = cwd / "Euclid.tla"
+            translated = tla_path.read_text() + (
+                "\nVARIABLES pc, x, y\n"
+                "Init == x = 10 /\\ y = 4 /\\ pc = \"Lbl_1\"\n"
+                "Next == UNCHANGED <<pc, x, y>>\n"
+                "Spec == Init /\\ [][Next]_<<pc, x, y>>\n"
+            )
+            tla_path.write_text(translated)
+            return RawOutput(argv, 0, "Translation completed.\n", ""), False
+        return RawOutput(argv, 0, "Model checking completed. No error has been found.\n", ""), False
+
+    monkeypatch.setattr(CliRunner, "_run", fake_run)
+    result = runner.check(PLUSCAL_SOURCE, "Euclid", PLUSCAL_CFG)
+
+    assert any("pcal.trans" in c for c in calls), "translator was never invoked"
+    assert result.ok
+    assert "x" in declared_variables_of(result)
+
+
+def declared_variables_of(result):
+    from tlakit.source import declared_variables
+
+    return declared_variables(result.source)
+
+
+def test_check_surfaces_translator_failure_as_a_diagnostic(tmp_path, monkeypatch):
+    from tlakit.result import RawOutput
+
+    runner = _fake_jar_runner(tmp_path)
+    error_stdout = (
+        'pcal.trans Version 1.12 of 01 July 2024\n\n'
+        'Unrecoverable error:\n'
+        ' -- Expected "if" but found "algorithm"\n'
+        '    line 9, column 5.\n\n'
+    )
+
+    def fake_run(self, argv, cwd, timeout):
+        assert "pcal.trans" in argv
+        return RawOutput(argv, 255, error_stdout, ""), False
+
+    monkeypatch.setattr(CliRunner, "_run", fake_run)
+    result = runner.check(PLUSCAL_BROKEN, "Broken3", "SPECIFICATION Spec\n")
+
+    assert result.outcome is Outcome.PARSE_ERROR
+    assert any("PlusCal" in d.message for d in result.errors)
+    assert any(d.line == 9 for d in result.errors)
+
+
+def test_parse_translates_pluscal_before_sany(tmp_path, monkeypatch):
+    from tlakit.result import RawOutput
+
+    runner = _fake_jar_runner(tmp_path)
+    calls = []
+
+    def fake_run(self, argv, cwd, timeout):
+        calls.append(argv)
+        if "pcal.trans" in argv:
+            return RawOutput(argv, 0, "Translation completed.\n", ""), False
+        return RawOutput(argv, 0, "", ""), False
+
+    monkeypatch.setattr(CliRunner, "_run", fake_run)
+    runner.parse(PLUSCAL_SOURCE, "Euclid")
+
+    assert len(calls) == 2
+    assert "pcal.trans" in calls[0]
+    assert "tla2sany.SANY" in calls[1]
+
+
+@pytest.mark.java
+def test_pluscal_end_to_end_translates_and_checks(runner):
+    result = runner.check(PLUSCAL_SOURCE, "Euclid", PLUSCAL_CFG)
+    assert result.ok
+    assert result.stats.distinct is not None and result.stats.distinct > 0
+
+
+@pytest.mark.java
+def test_pluscal_end_to_end_reports_a_real_translator_error(runner):
+    result = runner.check(PLUSCAL_BROKEN, "Broken3", "SPECIFICATION Spec\n")
+    assert result.outcome is Outcome.PARSE_ERROR
+    assert any("PlusCal" in d.message for d in result.errors)
+
+
 def test_unicode_in_a_spec_survives_a_round_trip(runner):
     """TLA+ allows Unicode operators, so every file and pipe must be UTF-8.
     Windows defaults to cp1252 and raised UnicodeDecodeError on the landing

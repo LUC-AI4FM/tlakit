@@ -30,10 +30,29 @@ class Rule:
             raise ValueError("limit must be >= 1 and window > 0")
 
 
-#: A model check costs seconds of CPU on a shared machine, so the per-minute
-#: allowance is small and there is an hourly ceiling on top of it. Both must
-#: pass.
-CHECK_RULES = (Rule(limit=6, window=60), Rule(limit=60, window=3600))
+#: Both must pass: a burst allowance per minute, and an hourly ceiling.
+#:
+#: These were 6/minute and 60/hour, which the browser tutorial hit *within its
+#: own page* -- it runs four checks, and re-running a cell after an edit is the
+#: entire point of a notebook. A limit a visitor trips by following the
+#: instructions is not protecting the machine, it is the product failing.
+#:
+#: Raising it is safe because the per-minute rule was never what bounded load.
+#: `serve/app.py` holds a semaphore of `MAX_CONCURRENCY` (2) and returns 503
+#: immediately when it is full rather than queueing, so at most two checks ever
+#: run at once no matter what any single client is allowed to ask for. With a
+#: 30-second cap per check, that ceiling is ~4 checks/minute of actual CPU
+#: whether this number is 6 or 60. What the per-minute rule actually does is
+#: stop one address monopolising those two slots.
+#:
+#: 30/minute is set to what a person can use, not to what the machine can
+#: survive -- those are different numbers here, and the second one is enforced
+#: somewhere else entirely. The Mini cannot be overloaded by raising this,
+#: because the semaphore is a hard ceiling that does not depend on it:
+#: `test_the_machine_is_protected_by_the_gate_not_by_this_limit` pins that.
+#:
+#: The hourly ceiling is what catches sustained abuse, as opposed to bursts.
+CHECK_RULES = (Rule(limit=30, window=60), Rule(limit=300, window=3600))
 #: The page and health endpoint are cheap, but not free, and an open redirect of
 #: traffic through them would still cost bandwidth.
 CHEAP_RULES = (Rule(limit=120, window=60),)
@@ -83,6 +102,22 @@ class RateLimiter:
 
             hits.append(now)
             return None
+
+    def refund(self, key: str) -> None:
+        """Give back the most recent request's slot.
+
+        For a request the server then refuses to do any work for. `/check`
+        rate-limits before it checks the concurrency gate -- deliberately, so
+        that a flood is cheap to reject -- which means a caller turned away
+        with "busy" had already paid for a check that never ran. Charging for
+        that is punishing someone twice for the server being busy, and during a
+        burst it is exactly the caller who most needs their next attempt to
+        land.
+        """
+        with self._lock:
+            hits = self._hits.get(key)
+            if hits:
+                hits.pop()
 
     def forget(self, key: str) -> None:
         with self._lock:

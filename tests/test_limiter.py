@@ -75,8 +75,28 @@ def test_only_cf_connecting_ip_is_trusted():
     assert client_key(None, None) == "unknown"
 
 
-def test_the_shipped_check_rules_are_conservative():
+def test_the_shipped_check_rules_are_shaped_for_a_person():
+    """This used to assert `per_minute.limit <= 10`, on the reasoning that a
+    model check costs seconds of shared CPU. The reasoning was right and the
+    conclusion was wrong: the per-minute rule is not what pays that cost.
+
+    `serve/app.py` admits at most `MAX_CONCURRENCY` checks at once and returns
+    503 rather than queueing, so the CPU ceiling is the same whether this
+    number is 6 or 60 -- while 6 was low enough that the published tutorial
+    tripped it from inside its own page. What is still worth asserting is the
+    shape: a burst allowance, a strictly larger hourly ceiling above it, and
+    neither of them unbounded.
+
+    The machine's own protection is pinned separately, in
+    `test_serve.py::test_the_machine_is_protected_by_the_gate_not_by_this_limit`.
+    """
     per_minute, per_hour = CHECK_RULES
-    assert per_minute.limit <= 10, "a model check costs seconds of shared CPU"
+    assert per_minute.window == 60
     assert per_hour.window == 3600
-    assert per_hour.limit >= per_minute.limit
+    assert per_minute.limit >= 12, "the browser tutorial alone needs headroom"
+    assert per_minute.limit <= 60, "past a check a second this stops being a limit"
+    assert per_hour.limit > per_minute.limit, "the ceiling must bind above the burst"
+    assert per_hour.limit < per_minute.limit * 60, (
+        "an hourly ceiling that a full hour at the per-minute rate cannot reach "
+        "is not a ceiling"
+    )

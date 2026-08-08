@@ -8,8 +8,10 @@ config cell names a module the notebook already defined, that `%pip` has a cell
 to itself, that no cell asks for an option the service refuses. The `java`-
 marked ones below run every module through SANY and every config cell through
 TLC, and compare the outcome against what the surrounding prose promises the
-reader -- the layer that would have caught all three bugs the published page
-shipped with.
+reader. Those are the two of the published page's three bugs that lived in a
+notebook rather than in the library: a module that did not parse, and a config
+whose outcome was not the one the prose promised. The third was `%%tla` itself
+and belongs to test_magics.
 
 Nothing here reaches the public runner. A suite that depended on a live service
 would fail for reasons having nothing to do with the commit.
@@ -58,6 +60,7 @@ APP_URLS = ("/lab/index.html?path=", "/notebooks/index.html?path=")
 
 @pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
 def test_links_between_notebooks_open_an_app(path: Path):
+    """See APP_URLS: the wrong shape here downloads a file instead of opening it."""
     found = 0
     for source in markdown_cells(path):
         for href in re.findall(r"\]\(([^)\s]+)\)", source):
@@ -178,8 +181,9 @@ def test_a_terminating_spec_says_what_it_wants_from_the_deadlock_check(path: Pat
 
 
 # --------------------------------------------------------------------------
-# Against a real TLC. Everything above is structural; this is the layer that
-# would have caught all three bugs the published page actually shipped with.
+# Against a real TLC. Everything above is structural, and structure is exactly
+# what could not have caught a module that fails to parse or a config that
+# reports something other than what the notebook says it will.
 # --------------------------------------------------------------------------
 
 #: What each config cell in these notebooks is supposed to report, written down

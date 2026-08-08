@@ -1,0 +1,82 @@
+name: hardening
+
+# Static analysis of the workflows themselves. CI proves the code works;
+# nothing until now proved the pipeline that builds and publishes it is safe.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, so a newly-published advisory about an action shows up without
+    # waiting for the next pull request.
+    - cron: "37 5 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: actionlint
+        # Catches shell bugs inside `run:` blocks and invalid workflow syntax --
+        # the kind of thing that otherwise fails for the first time during a
+        # release, which is the worst moment to find out.
+        run: |
+          set -euo pipefail
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/914e7df21a07ef503a81201c76d2b11c789d3fca/scripts/download-actionlint.bash)
+          ./actionlint -color -verbose
+
+  zizmor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Audit workflows for security smells
+        # zizmor knows the Actions-specific footguns: template injection into
+        # `run:`, credential persistence, unpinned actions, over-broad
+        # permissions, cache poisoning of release artifacts.
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade zizmor
+          zizmor --format sarif .github/workflows > zizmor.sarif || true
+          zizmor --min-severity medium .github/workflows
+      - uses: github/codeql-action/upload-sarif@18420e3271f74589575af831a523c833acda327f # codeql-bundle-v2.26.2
+        if: always()
+        with:
+          sarif_file: zizmor.sarif
+          category: zizmor
+
+  scorecard:
+    # OpenSSF Scorecard: an outside opinion on branch protection, pinning,
+    # token permissions and dangerous workflow patterns. Runs on main only --
+    # it needs repo-level metadata a fork's pull request cannot see.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: false
+      - uses: github/codeql-action/upload-sarif@18420e3271f74589575af831a523c833acda327f # codeql-bundle-v2.26.2
+        with:
+          sarif_file: scorecard.sarif
+          category: scorecard

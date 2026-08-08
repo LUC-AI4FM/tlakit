@@ -1,13 +1,34 @@
-"""Static HTML for notebook output. No JavaScript, no widget toolchain.
+"""Notebook output: static HTML, plus an interactive TraceView widget.
 
-M1 renders only static views, so anywidget is not a dependency yet. Interactive
-widgets (TraceView, AnimPlayer) arrive in M2.
+The static views (`result_html`, `CheckResult._repr_html_`) need nothing but
+the standard library and render everywhere -- a GitHub-rendered notebook, an
+nbconvert export, a plain `str()`. `TraceView` is richer: it scrubs through a
+trace one step at a time instead of dumping every step into one table, which
+stops being usable past a handful of states.
+
+That richness is optional. `anywidget` (M2's addition) is declared under the
+`widget` extra, not as a hard dependency, so `import tlakit` and every static
+render path must keep working with it absent. The import below is guarded;
+when anywidget is missing, `TraceView` still exists and still holds the same
+per-step data, it just has no JS half and falls back to the static
+`_repr_html_` used everywhere else in this module.
 """
 from __future__ import annotations
 
 from html import escape
+from typing import Any
 
-from .result import CheckResult, Outcome
+from .result import CheckResult, Outcome, Trace
+
+try:
+    import anywidget
+    import traitlets
+
+    HAS_ANYWIDGET = True
+except ImportError:  # anywidget is the `widget` extra, not a hard dependency
+    anywidget = None  # type: ignore[assignment]
+    traitlets = None  # type: ignore[assignment]
+    HAS_ANYWIDGET = False
 
 _CSS = """
 <style>
@@ -173,3 +194,236 @@ def result_html(result: CheckResult, source: str | None = None) -> str:
     parts.append(_stats_html(result))
     parts.append("</div>")
     return "".join(parts)
+
+
+def _steps_from_trace(trace: Trace) -> list[dict[str, Any]]:
+    """One entry per state: the state itself, what changed, and the action
+    that produced it. `trace.states` already came from JSON (`-dumpTrace
+    json`), so every value here is JSON-safe -- nothing to convert.
+    """
+    steps: list[dict[str, Any]] = []
+    for index, state in enumerate(trace.states):
+        if index == 0:
+            action_name = action_module = None
+            action_line: int | None = None
+        else:
+            action = trace.actions[index - 1]
+            action_name = action.name
+            action_module = action.module
+            action_line = action.begin_line
+        steps.append(
+            {
+                "index": index,
+                "state": dict(state),
+                "changed": sorted(trace.delta(index)),
+                "action": action_name,
+                "module": action_module,
+                "line": action_line,
+            }
+        )
+    return steps
+
+
+def _static_trace_view_html(steps: list[dict[str, Any]], variables: list[str]) -> str:
+    """The non-interactive rendering of a TraceView: every step, changed
+    variables highlighted, same as `result_html`'s own trace table. This is
+    what `_repr_html_` gives frontends that do not run the widget's JS --
+    nbconvert, GitHub's notebook renderer, `str()`.
+    """
+    header = "".join(f"<th>{escape(v)}</th>" for v in variables)
+    rows = [f"<tr><th>step</th><th>action</th>{header}</tr>"]
+    for step in steps:
+        action = escape(step["action"]) if step["action"] else "&lt;initial&gt;"
+        changed = set(step["changed"])
+        cells = []
+        for name in variables:
+            value = escape(repr(step["state"].get(name)))
+            css = ' class="tlakit-changed"' if name in changed else ""
+            cells.append(f"<td{css}>{value}</td>")
+        rows.append(
+            f"<tr><td>{step['index'] + 1}</td><td>{action}</td>"
+            + "".join(cells)
+            + "</tr>"
+        )
+    return _CSS + "<table>" + "".join(rows) + "</table>"
+
+
+_TRACE_VIEW_ESM = """
+function render({ model, el }) {
+  el.classList.add("tlakit-tracewidget");
+  el.innerHTML = "";
+
+  const header = document.createElement("div");
+  header.className = "tlakit-tw-header";
+  const prevBtn = document.createElement("button");
+  prevBtn.textContent = "\\u2190";
+  const nextBtn = document.createElement("button");
+  nextBtn.textContent = "\\u2192";
+  const slider = document.createElement("input");
+  slider.type = "range";
+  slider.min = "0";
+  const label = document.createElement("span");
+  label.className = "tlakit-tw-label";
+  header.appendChild(prevBtn);
+  header.appendChild(slider);
+  header.appendChild(nextBtn);
+  header.appendChild(label);
+
+  const actionLine = document.createElement("div");
+  actionLine.className = "tlakit-tw-action";
+
+  const table = document.createElement("table");
+
+  el.appendChild(header);
+  el.appendChild(actionLine);
+  el.appendChild(table);
+
+  function draw() {
+    const steps = model.get("steps");
+    const variables = model.get("variables");
+    const i = model.get("step");
+    slider.max = String(Math.max(steps.length - 1, 0));
+    slider.value = String(i);
+    label.textContent = `step ${i + 1} / ${steps.length}`;
+    prevBtn.disabled = i <= 0;
+    nextBtn.disabled = i >= steps.length - 1;
+
+    const step = steps[i];
+    if (step.action) {
+      const where = step.module
+        ? step.module + (step.line ? ":" + step.line : "")
+        : "";
+      actionLine.textContent = where ? `${step.action} (${where})` : step.action;
+    } else {
+      actionLine.textContent = "<initial>";
+    }
+
+    const changed = new Set(step.changed || []);
+    const rows = variables.map((name) => {
+      const value = JSON.stringify(step.state[name]);
+      const cls = changed.has(name) ? ' class="tlakit-changed"' : "";
+      return `<tr><th>${name}</th><td${cls}>${value}</td></tr>`;
+    });
+    table.innerHTML = rows.join("");
+  }
+
+  slider.addEventListener("input", () => {
+    model.set("step", Number(slider.value));
+    model.save_changes();
+  });
+  prevBtn.addEventListener("click", () => {
+    model.set("step", Math.max(0, model.get("step") - 1));
+    model.save_changes();
+  });
+  nextBtn.addEventListener("click", () => {
+    const steps = model.get("steps");
+    model.set("step", Math.min(steps.length - 1, model.get("step") + 1));
+    model.save_changes();
+  });
+  model.on("change:step", draw);
+  draw();
+}
+export default { render };
+"""
+
+_TRACE_VIEW_CSS = """
+.tlakit-tracewidget { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tlakit-tw-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.tlakit-tw-label { opacity: .7; }
+.tlakit-tw-action { margin-bottom: 6px; font-weight: 600; }
+.tlakit-tracewidget table { border-collapse: collapse; }
+.tlakit-tracewidget td, .tlakit-tracewidget th { border: 1px solid rgba(127,127,127,.32);
+                                                  padding: 3px 8px; text-align: left; }
+.tlakit-tracewidget .tlakit-changed { background: rgba(255,180,0,.30); font-weight: 600; }
+"""
+
+
+def _trace_view_init(view: Any, trace: Trace) -> tuple[list[dict[str, Any]], list[str]]:
+    if trace is None or not trace.states:
+        raise ValueError("TraceView requires a non-empty trace")
+    variables = trace.variables or sorted({k for state in trace.states for k in state})
+    return _steps_from_trace(trace), variables
+
+
+if HAS_ANYWIDGET:
+
+    class TraceView(anywidget.AnyWidget):  # type: ignore[misc]
+        """Scrubs through a counterexample trace one step at a time.
+
+        Works in Jupyter, Lab, Colab, and VSCode notebooks with no separate
+        labextension: the JS and CSS are inlined in `_esm`/`_css` and shipped
+        with anywidget's own runtime, per anywidget's model. `step`, `steps`,
+        `variables`, and `loop_start` are synced traitlets, so the current
+        step set from JS (dragging the slider) is visible from Python too.
+        """
+
+        _esm = _TRACE_VIEW_ESM
+        _css = _TRACE_VIEW_CSS
+
+        step = traitlets.Int(0).tag(sync=True)
+        steps = traitlets.List([]).tag(sync=True)
+        variables = traitlets.List([]).tag(sync=True)
+        loop_start = traitlets.Any(None).tag(sync=True)
+
+        def __init__(self, trace: Trace, **kwargs: Any) -> None:
+            steps, variables = _trace_view_init(self, trace)
+            super().__init__(
+                step=0,
+                steps=steps,
+                variables=variables,
+                loop_start=trace.loop_start,
+                **kwargs,
+            )
+
+        def __len__(self) -> int:
+            return len(self.steps)
+
+        @property
+        def current(self) -> dict[str, Any]:
+            return self.steps[self.step]
+
+        def set_step(self, index: int) -> None:
+            if not 0 <= index < len(self.steps):
+                raise IndexError(index)
+            self.step = index
+
+        def _repr_html_(self) -> str:
+            return _static_trace_view_html(self.steps, self.variables)
+
+else:
+
+    class TraceView:  # type: ignore[no-redef]
+        """`TraceView` without anywidget installed: same per-step data and the
+        same public API, but nothing to scrub with. `_repr_html_` renders the
+        whole trace statically, same as `result_html` does.
+        """
+
+        def __init__(self, trace: Trace) -> None:
+            self.steps, self.variables = _trace_view_init(self, trace)
+            self.step = 0
+            self.loop_start = trace.loop_start
+
+        def __len__(self) -> int:
+            return len(self.steps)
+
+        @property
+        def current(self) -> dict[str, Any]:
+            return self.steps[self.step]
+
+        def set_step(self, index: int) -> None:
+            if not 0 <= index < len(self.steps):
+                raise IndexError(index)
+            self.step = index
+
+        def _repr_html_(self) -> str:
+            return _static_trace_view_html(self.steps, self.variables)
+
+
+def trace_view(result: CheckResult) -> "TraceView | None":
+    """Build a TraceView from a CheckResult's trace, or None when TLC found
+    no counterexample. Mirrors `result_html(result)`'s CheckResult -> HTML
+    convenience, one level up: CheckResult -> widget.
+    """
+    if result.trace is None or not result.trace.states:
+        return None
+    return TraceView(result.trace)

@@ -15,7 +15,7 @@ from __future__ import annotations
 from ipykernel.ipkernel import IPythonKernel
 
 from .. import __version__
-from .routing import Cell, ambiguous_config_message, classify
+from ..routing import Cell, ambiguous_config_message, classify
 
 __all__ = ["TlaKernel", "Cell", "classify"]
 

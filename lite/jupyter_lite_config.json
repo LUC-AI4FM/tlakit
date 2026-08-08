@@ -1,0 +1,18 @@
+{
+  "LiteBuildConfig": {
+    "contents": [
+      "files"
+    ],
+    "output_dir": "../lite-dist",
+    "apps": [
+      "lab",
+      "notebooks",
+      "tree"
+    ]
+  },
+  "PipliteAddon": {
+    "piplite_urls": [
+      "./wheels/tlakit-0.1.0.dev0-py3-none-any.whl"
+    ]
+  }
+}

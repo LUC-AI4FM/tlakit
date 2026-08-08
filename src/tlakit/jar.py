@@ -9,8 +9,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import platformdirs
-
 TOOLS_JAR = "tla2tools.jar"
 COMMUNITY_JAR = "CommunityModules-deps.jar"
 ENV_TOOLS = "TLAKIT_TLA2TOOLS"
@@ -26,6 +24,15 @@ class NotIsolated(RuntimeError):
 
 
 def cache_dir() -> Path:
+    """Where `python -m tlakit.install` puts a downloaded jar.
+
+    platformdirs is imported here rather than at module scope so that importing
+    tlakit needs no third-party package at all. That matters in a browser: a
+    Pyodide kernel checks specs over HTTP and never resolves a jar, so making it
+    fetch a wheel just to reach an unused code path would be waste.
+    """
+    import platformdirs
+
     return Path(platformdirs.user_cache_dir("tlakit"))
 
 

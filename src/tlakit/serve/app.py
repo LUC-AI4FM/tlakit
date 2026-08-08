@@ -17,6 +17,7 @@ import pathlib
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -109,6 +110,23 @@ def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = No
             "CommunityModules, so they have no I/O primitives."
         ),
         version="0.1.0",
+    )
+
+    # Any origin may call this, because a browser is now a first-class client:
+    # tlakit's Pyodide kernel runs in the visitor's own tab and reaches this
+    # service by fetch, and a JSON content-type makes that a preflighted
+    # request. A wildcard is the right answer rather than a lax one -- the
+    # service has no cookies and no session, so there is nothing an attacker
+    # could ride. `allow_credentials` stays False for exactly that reason: the
+    # moment it is True, a wildcard becomes illegal and the browser will
+    # (correctly) refuse the response.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["content-type"],
+        max_age=86400,
     )
 
     # A single static string, read once at startup. Not a file server: there is

@@ -1,5 +1,6 @@
 """Issue #39: the public service must expose exactly one capability."""
 import shutil
+import sys
 
 import pytest
 
@@ -292,6 +293,11 @@ def test_an_unreadable_key_file_locks_everything_out(monkeypatch, tmp_path):
         assert exc.value.status_code == 401
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="chmod(0) does not remove owner read access on Windows, so the "
+    "condition under test cannot be created; the check itself is portable",
+)
 def test_startup_refuses_an_unreadable_jar(tmp_path):
     """An unreadable jar makes java fail with ClassNotFoundException, which
     reaches the client as a bare 'exit code 1'. Catch it once, at startup."""
@@ -458,3 +464,30 @@ def test_graph_edges_never_dangle(client):
     g = body["graph"]
     ids = {n["id"] for n in g["nodes"]}
     assert all(e["from"] in ids and e["to"] in ids for e in g["edges"])
+
+
+def test_preflight_is_allowed_so_a_browser_kernel_can_call_check(client):
+    """tlakit's Pyodide kernel POSTs JSON, which browsers preflight."""
+    response = client.options(
+        "/check",
+        headers={
+            "origin": "https://tlakit.pages.dev",
+            "access-control-request-method": "POST",
+            "access-control-request-headers": "content-type",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "*"
+    assert "POST" in response.headers["access-control-allow-methods"]
+
+
+def test_cors_never_allows_credentials(client):
+    """A wildcard origin plus credentials is illegal and would break the page."""
+    response = client.options(
+        "/check",
+        headers={
+            "origin": "https://tlakit.pages.dev",
+            "access-control-request-method": "POST",
+        },
+    )
+    assert "access-control-allow-credentials" not in response.headers

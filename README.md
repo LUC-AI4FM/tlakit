@@ -78,6 +78,31 @@ SPECIFICATION Spec
 INVARIANT Safety
 ```
 
+## Or from a shell, with no Python at all
+
+```bash
+tlakit check Counter.tla                      # uses Counter.cfg if it is there
+tlakit check Counter.tla --invariant Inv      # or build the config from flags
+tlakit check Counter.tla --no-deadlock-check  # a spec that is meant to finish
+tlakit parse Counter.tla                      # SANY only, no search
+```
+
+Exit codes make it composable, and they distinguish two things a shell
+otherwise cannot:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | the spec checked out |
+| `1` | the run succeeded and found something wrong with the spec |
+| `2` | the run did not happen — bad flags, missing file, no JVM |
+
+So `tlakit check Spec.tla && deploy` does not deploy on a violated invariant,
+and a CI job can still tell a real failure from a typo in a path.
+
+`--no-deadlock-check` is worth knowing about early: a specification meant to
+*finish* has no successor state at the end, and TLC reports that as
+`DEADLOCK` — correctly, since it cannot know termination was intended.
+
 ## Related work
 
 tlakit is the next evolution of Läufer and Thiruvathukal's *TLA+ for All: Model

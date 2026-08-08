@@ -25,6 +25,11 @@ classifiers = [
 ]
 dependencies = ["platformdirs>=4.0"]
 
+# `tlakit.cli` is the CliRunner -- the thing that shells out to java -- so the
+# command line lives in `cli_main` rather than shadowing it.
+[project.scripts]
+tlakit = "tlakit.cli_main:main"
+
 [project.urls]
 Homepage = "https://github.com/LUC-AI4FM/tlakit"
 Repository = "https://github.com/LUC-AI4FM/tlakit"

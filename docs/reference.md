@@ -133,7 +133,13 @@ this raises `Unsupported`; express the value as an operator and check it as an
 Everything in `tlakit.__all__`, grouped by what it is for. Follow a name to its
 docstring for the detail.
 
-**Entry points** — `load`, `check_source`, `Spec`, `build_config`
+**Entry points** — `load`, `check_source`, `Spec`, `build_config`, `Raw`
+
+**Command line** — `tlakit check <file>.tla` and `tlakit parse <file>.tla`.
+Exit `0` when the spec checked out, `1` when the run found something wrong with
+it, `2` when the run could not happen. The last two are separate so that
+`tlakit check Spec.tla && deploy` is meaningful and a CI job can still tell a
+violated invariant from a mistyped path.
 
 **Results** — `CheckResult`, `Outcome`, `Trace`, `Action`, `Diagnostic`,
 `Severity`, `Stats`, `RawOutput`, `flatten_state`

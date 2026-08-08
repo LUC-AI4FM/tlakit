@@ -100,8 +100,27 @@ def module_name_of(source: str) -> str:
     return match.group(1)
 
 
+class Raw(str):
+    """TLA+ source text that must reach the config unquoted.
+
+    `tla_value` renders a `str` as a TLA+ *string*, which is what you want for
+    `Name = "ada"` and not what you want for `Procs = {a, b}` -- a set of model
+    values, which is the ordinary way to write a CONSTANT and is not any
+    serialisation format we could parse into Python. Wrapping it says "this is
+    already TLA+, pass it through".
+
+        constants={"Procs": Raw("{a, b}"), "Name": "ada"}
+
+    It is a `str` subclass so that everything which does not care about the
+    distinction -- logging, equality, `.format` -- keeps working.
+    """
+
+
 def tla_value(value: Any) -> str:
     """Render a Python value as TLA+ syntax."""
+    # Before the `str` branch: Raw is a str and must not be quoted.
+    if isinstance(value, Raw):
+        return str(value)
     if isinstance(value, bool):
         return "TRUE" if value else "FALSE"
     if isinstance(value, int):

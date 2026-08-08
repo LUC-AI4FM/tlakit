@@ -129,6 +129,7 @@ def build_config(
     constants: dict[str, Any] | None = None,
     invariants: list[str] | None = None,
     properties: list[str] | None = None,
+    check_deadlock: bool | None = None,
 ) -> str:
     """Assemble a TLC `.cfg` file."""
     lines: list[str] = []
@@ -146,6 +147,8 @@ def build_config(
             lines.append(f"NEXT {next_}")
     lines += [f"INVARIANT {name}" for name in (invariants or [])]
     lines += [f"PROPERTY {name}" for name in (properties or [])]
+    if check_deadlock is not None:
+        lines.append(f"CHECK_DEADLOCK {'TRUE' if check_deadlock else 'FALSE'}")
     return "\n".join(lines) + "\n"
 
 
@@ -176,6 +179,16 @@ class Spec:
     def _runner(self) -> CliRunner:
         return self.runner or default_runner()
 
+    @property
+    def can_parse(self) -> bool:
+        """Whether the active runner offers SANY at all.
+
+        False against the remote service, which exposes checking only. Callers
+        that parse for speed rather than because the user asked -- `%%tla` --
+        should skip it instead of turning a working cell into a traceback.
+        """
+        return bool(getattr(self._runner(), "can_parse", True))
+
     def parse(self) -> CheckResult:
         """Syntax- and level-check with SANY."""
         return self._runner().parse(self.source, self.name)
@@ -190,6 +203,7 @@ class Spec:
         constants: dict[str, Any] | None = None,
         invariants: list[str] | None = None,
         properties: list[str] | None = None,
+        check_deadlock: bool | None = None,
         timeout: float | None = None,
         coverage: bool = False,
         animate: bool = False,
@@ -202,6 +216,11 @@ class Spec:
 
         Pass `config` for raw `.cfg` text, or any of `spec`/`init`/`next_`/
         `constants`/`invariants`/`properties` to have one built.
+
+        `check_deadlock=False` turns off TLC's deadlock check. A specification
+        whose behaviours are meant to *finish* has no successor state at the
+        end, which TLC reports as a deadlock by default -- correctly, since it
+        cannot know termination was intended.
         """
         if config is None:
             config = build_config(
@@ -211,6 +230,12 @@ class Spec:
                 constants=constants,
                 invariants=invariants,
                 properties=properties,
+                check_deadlock=check_deadlock,
+            )
+        elif check_deadlock is not None:
+            raise ValueError(
+                "pass check_deadlock= or config=, not both; a raw config says "
+                "what it wants with its own CHECK_DEADLOCK line."
             )
         options = list(extra_opts or [])
         if coverage and "-coverage" not in options:

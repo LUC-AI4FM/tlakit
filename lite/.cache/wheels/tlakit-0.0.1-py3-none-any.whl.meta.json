@@ -1,0 +1,24 @@
+{
+  "name": "tlakit",
+  "release": {
+    "comment_text": "",
+    "digests": {
+      "md5": "fddc4612712aff0077f4077035d8f5a0",
+      "sha256": "6445387deb56b60d4aa001f09e90706873b7c873b4be862c882df2459efc91ef"
+    },
+    "downloads": -1,
+    "filename": "tlakit-0.0.1-py3-none-any.whl",
+    "has_sig": false,
+    "md5_digest": "fddc4612712aff0077f4077035d8f5a0",
+    "packagetype": "bdist_wheel",
+    "python_version": "py3",
+    "requires_python": ">=3.10",
+    "size": 66498,
+    "upload_time": "2026-08-08T06:06:18.633095Z",
+    "upload_time_iso_8601": "2026-08-08T06:06:18.633095Z",
+    "url": "./tlakit-0.0.1-py3-none-any.whl",
+    "yanked": false,
+    "yanked_reason": null
+  },
+  "version": "0.0.1"
+}

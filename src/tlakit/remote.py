@@ -128,6 +128,10 @@ def default_transport() -> Callable[[str, str, bytes | None, float], tuple[int, 
 class RemoteRunner:
     """A `CliRunner`-shaped client for the public checking service."""
 
+    #: The service exposes checking only, so callers that parse merely to give
+    #: fast feedback -- `%%tla` above all -- can skip it instead of failing.
+    can_parse = False
+
     endpoint: str = DEFAULT_ENDPOINT
     timeout: float = DEFAULT_TIMEOUT
     #: Injectable so tests never touch the network.

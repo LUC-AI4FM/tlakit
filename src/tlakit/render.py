@@ -16,7 +16,7 @@ per-step data, it just has no JS half and falls back to the static
 from __future__ import annotations
 
 from html import escape
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .result import CheckResult, Outcome, Trace
 
@@ -29,6 +29,9 @@ except ImportError:  # anywidget is the `widget` extra, not a hard dependency
     anywidget = None  # type: ignore[assignment]
     traitlets = None  # type: ignore[assignment]
     HAS_ANYWIDGET = False
+
+if TYPE_CHECKING:  # magics imports render at call time, so only for types
+    from .magics import ModuleDefined
 
 _CSS = """
 <style>
@@ -55,8 +58,21 @@ _CSS = """
                     background: #fff; display: block; max-width: 260px;
                     height: auto; }
 .tlakit-frame figcaption { font-size: 11px; opacity: .7; margin-top: 3px; }
+.tlakit-note { background: rgba(90,130,220,.16); }
+.tlakit-hint { opacity: .75; margin-top: 4px; }
 </style>
 """
+
+#: The deadlock hint. TLC cannot tell "finished" from "stuck" -- both are a
+#: state with no successor -- so a terminating algorithm trips this check every
+#: time. Saying only "Deadlock reached" sends that reader hunting for a bug
+#: that is not there, and says nothing to the reader whose bug is real.
+_DEADLOCK_HINT = (
+    "A state with no successor. That is a real deadlock only if this "
+    "specification was not meant to terminate — TLC cannot tell the two apart. "
+    "If it was, turn the check off: <code>CHECK_DEADLOCK FALSE</code> in the "
+    "config, or <code>check_deadlock=False</code> from Python."
+)
 
 _HEADLINE = {
     Outcome.OK: "No error has been found.",
@@ -176,6 +192,21 @@ def _frames_html(result: CheckResult) -> str:
     return '<div class="tlakit-film">' + "".join(figures) + "</div>"
 
 
+def module_defined_html(module: "ModuleDefined") -> str:
+    """Render the `%%tla` acknowledgement. See `magics.ModuleDefined`."""
+    variables = ", ".join(module.variables) or "none declared"
+    return (
+        _CSS
+        + '<div class="tlakit">'
+        + '<div class="tlakit-banner tlakit-note">Module '
+        + f"<b>{escape(module.name)}</b> stored. Variables: "
+        + f"{escape(variables)}.</div>"
+        + '<div class="tlakit-hint">Not parsed yet — this runner has no SANY. '
+        + "Run a config cell to check it; TLC parses before it explores.</div>"
+        + "</div>"
+    )
+
+
 def result_html(result: CheckResult, source: str | None = None) -> str:
     """Render a CheckResult as self-contained HTML."""
     source = source if source is not None else result.source
@@ -185,8 +216,12 @@ def result_html(result: CheckResult, source: str | None = None) -> str:
         _CSS,
         '<div class="tlakit">',
         f'<div class="tlakit-banner {banner}">{escape(headline)}</div>',
-        _diagnostics_html(result),
     ]
+    if result.outcome is Outcome.DEADLOCK:
+        # Not escaped: the hint is a fixed string in this module and carries
+        # its own markup.
+        parts.append(f'<div class="tlakit-hint">{_DEADLOCK_HINT}</div>')
+    parts.append(_diagnostics_html(result))
     if source is not None:
         parts.append(_source_html(source, result))
     parts.append(_frames_html(result))

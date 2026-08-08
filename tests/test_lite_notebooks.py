@@ -17,6 +17,7 @@ would fail for reasons having nothing to do with the commit.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -35,6 +36,39 @@ def code_cells(path: Path) -> list[str]:
         for cell in nb["cells"]
         if cell["cell_type"] == "code"
     ]
+
+
+def markdown_cells(path: Path) -> list[str]:
+    nb = json.loads(path.read_text(encoding="utf-8"))
+    return [
+        "".join(cell["source"])
+        for cell in nb["cells"]
+        if cell["cell_type"] == "markdown"
+    ]
+
+
+#: How one notebook is allowed to link to another. JupyterLab's markdown
+#: renderer rewrites every *relative* href into `/files/<the whole thing,
+#: percent-encoded>` -- so `[x](examples.ipynb)` serves raw JSON as a download,
+#: and `[x](../lab/index.html?path=examples.ipynb)` 404s with the `?` encoded
+#: away. Measured in both the lab and notebooks apps on 2026-08-08. Absolute
+#: paths are left alone, which makes these the only forms that open anything.
+APP_URLS = ("/lab/index.html?path=", "/notebooks/index.html?path=")
+
+
+@pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
+def test_links_between_notebooks_open_an_app(path: Path):
+    found = 0
+    for source in markdown_cells(path):
+        for href in re.findall(r"\]\(([^)\s]+)\)", source):
+            if ".ipynb" not in href:
+                continue
+            found += 1
+            assert href.startswith(APP_URLS), (
+                f"{path.name} links to {href!r}; a relative notebook link is "
+                f"rewritten into a raw download. Use one of {APP_URLS}."
+            )
+    assert found or path.name == "scratch.ipynb"
 
 
 def test_the_build_ships_notebooks():

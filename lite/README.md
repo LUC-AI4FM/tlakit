@@ -22,6 +22,16 @@ sidebar, no launcher, and nothing to read:
 https://<site>/notebooks/index.html?path=scratch.ipynb
 ```
 
+The notebooks link to each other with **root-absolute** app URLs of that shape,
+and they have to. JupyterLab's markdown renderer rewrites any relative href
+into `/files/<the whole thing, percent-encoded>`, so `[x](examples.ipynb)`
+serves raw JSON as a download and `[x](../lab/index.html?path=examples.ipynb)`
+404s with the `?` encoded away — measured in both apps on 2026-08-08 and
+guarded by `test_links_between_notebooks_open_an_app`. The cost is that these
+links assume the site is served from a domain root. It is (`tlakit.pages.dev`,
+and `lite/serve.py` locally); deploy it under a subpath and they will need a
+prefix.
+
 `tests/test_lite_notebooks.py` guards these in two layers. Structurally: a
 config cell that names no module, `%pip` sharing a cell with code that needs
 what it installs, an option the service refuses, and a terminating spec checked

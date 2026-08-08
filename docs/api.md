@@ -93,6 +93,20 @@ notebook magics — which have no docstring to be generated from — see
         - describe
         - word_at
 
+## Stepping under the TLA+ Debugger
+
+::: tlakit.dap
+    options:
+      members:
+        - DebugSession
+        - Step
+        - walk
+        - next_relation
+        - relation_lines
+        - DapClient
+        - DebuggerError
+        - DebuggerTimeout
+
 ## Notebook rendering
 
 ::: tlakit.render
@@ -101,6 +115,7 @@ notebook magics — which have no docstring to be generated from — see
         - result_html
         - TraceView
         - trace_view
+        - stepper_view
 
 ## Magics
 

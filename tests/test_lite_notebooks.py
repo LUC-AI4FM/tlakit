@@ -1,15 +1,23 @@
 """The notebooks the browser build ships.
 
 These are the first thing a visitor runs, and a broken one is worse than no
-page at all -- it teaches the reader that the tool does not work. Executing
-them here would mean a JVM and a network, so this checks the parts that went
-wrong in practice and are checkable offline: that a config cell names a module
-the notebook already defined, and that no cell asks for something the remote
-runner refuses.
+page at all -- it teaches the reader that the tool does not work.
+
+Two layers. The structural checks need nothing but the notebook JSON: that a
+config cell names a module the notebook already defined, that `%pip` has a cell
+to itself, that no cell asks for an option the service refuses. The `java`-
+marked ones below run every module through SANY and every config cell through
+TLC, and compare the outcome against what the surrounding prose promises the
+reader -- the layer that would have caught all three bugs the published page
+shipped with.
+
+Nothing here reaches the public runner. A suite that depended on a live service
+would fail for reasons having nothing to do with the commit.
 """
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -131,3 +139,90 @@ def test_a_terminating_spec_says_what_it_wants_from_the_deadlock_check(path: Pat
         # The tutorial is what this rule exists for, and a refactor that stops
         # matching its config cells would otherwise pass by checking nothing.
         assert checked == 2, f"expected 2 terminating checks, matched {checked}"
+
+
+# --------------------------------------------------------------------------
+# Against a real TLC. Everything above is structural; this is the layer that
+# would have caught all three bugs the published page actually shipped with.
+# --------------------------------------------------------------------------
+
+#: What each config cell in these notebooks is supposed to report, written down
+#: rather than inferred, so a spec that quietly changes its answer is a failure
+#: instead of a new baseline. The prose around each cell tells the reader the
+#: same thing; this is that claim, made executable.
+EXPECTED_OUTCOMES = {
+    # The bug the tutorial is about. This spec terminates, so it would deadlock
+    # too -- but TLC evaluates the invariant on the offending state before it
+    # ever tries to expand it, so the violation is what gets reported.
+    ("tla-in-your-browser.ipynb", "LostUpdate"): "invariant_violation",
+    # The fix, and clean only because the config turns the deadlock check off.
+    ("tla-in-your-browser.ipynb", "Atomic"): "ok",
+    # Not a termination artifact: this spec loops forever by construction.
+    ("examples.ipynb", "LockOrder"): "deadlock",
+}
+
+
+@pytest.fixture(scope="module")
+def runner():
+    """A local TLC with CommunityModules refused.
+
+    The public runner has none, so a notebook that leans on one has to fail
+    here rather than pass locally and break for every visitor.
+    """
+    import tlakit
+    from tlakit.jar import JarNotFound
+
+    if shutil.which("java") is None:
+        pytest.skip("java not on PATH")
+    try:
+        return tlakit.CliRunner(community_jar=False)
+    except JarNotFound as exc:
+        pytest.skip(str(exc))
+
+
+def modules_and_configs(path: Path) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """Walk a notebook the way a kernel does, pairing configs with modules."""
+    modules: dict[str, str] = {}
+    pairs: list[tuple[str, str]] = []
+    for code in code_cells(path):
+        kind, rewritten = classify(code, set(modules))
+        if kind == Cell.TLA:
+            modules[module_name(code)] = code
+        elif kind == Cell.TLC and rewritten:
+            head, _, body = rewritten.partition("\n")
+            pairs.append((head.removeprefix("%%tlc ").strip(), body))
+    return modules, pairs
+
+
+@pytest.mark.java
+@pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
+def test_every_module_parses(runner, path: Path):
+    """SANY on each module -- the check the browser itself cannot run.
+
+    The service exposes no parser, which is exactly why `LostUpdate` shipped
+    calling Cardinality without EXTENDS FiniteSets: nothing on the page could
+    tell anyone until a reader ran the cell and got a traceback.
+    """
+    modules, _ = modules_and_configs(path)
+    assert modules or path.name == "scratch.ipynb", f"{path.name} defines none"
+    for name, source in modules.items():
+        result = runner.parse(source, name)
+        assert result.ok, f"{path.name}: {name} does not parse: {result.errors}"
+
+
+@pytest.mark.java
+@pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
+def test_every_config_cell_reports_what_the_notebook_says_it_does(runner, path):
+    """The end of the chain: run it, and hold it against the prose."""
+    modules, pairs = modules_and_configs(path)
+    for name, config in pairs:
+        expected = EXPECTED_OUTCOMES.get((path.name, name))
+        assert expected is not None, (
+            f"{path.name} checks {name}, which has no entry in "
+            "EXPECTED_OUTCOMES; add what the notebook claims it reports"
+        )
+        result = runner.check(modules[name], name, config, timeout=60)
+        assert result.outcome.value == expected, (
+            f"{path.name}: {name} reported {result.outcome.value}, and the "
+            f"notebook tells the reader to expect {expected}"
+        )

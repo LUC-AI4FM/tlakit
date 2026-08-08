@@ -1,7 +1,12 @@
 """tlakit — a Python and notebook client for the TLA+ toolchain."""
 from __future__ import annotations
 
-from . import api, install, jar, sweep
+# `remote` is listed in `__all__`, so it has to be imported here rather than
+# left to a lazy `from .remote import ...` inside `use_remote`. `from tlakit
+# import *` happens to work either way -- the import machinery imports a
+# submodule named in `__all__` -- but plain `import tlakit; tlakit.remote`
+# raised AttributeError until whatever else pulled the submodule in.
+from . import api, install, jar, remote, sweep
 from .api import (
     Spec,
     build_config,

@@ -100,3 +100,26 @@ jobs:
         run: |
           # tlakit is a library others embed; importing it must never shell out.
           env -u TLAKIT_TLA2TOOLS python -c "import tlakit; print(tlakit.__version__)"
+
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        # The package itself, not just mkdocs: mkdocstrings imports tlakit to
+        # read its docstrings, so a docs build is also an import check.
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[docs,notebook,widget,serve]"
+
+      - name: Build
+        # --strict turns a broken cross-reference or an unresolved `:::`
+        # target into a failure. Without it the build is green whatever it
+        # failed to find, which is the one thing this job exists to catch.
+        run: python -m mkdocs build --strict

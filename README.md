@@ -103,6 +103,18 @@ Or point tlakit at jars you already have with
 `TLAKIT_COMMUNITY_MODULES` optionally locates `CommunityModules-deps.jar`, which
 `SVG.tla` and `Json.tla` need.
 
+## Documentation
+
+[`docs/reference.md`](docs/reference.md) is the reference: every environment
+variable, every magic and its arguments, and a map of the public names.
+[`docs/api.md`](docs/api.md) generates the API from the docstrings.
+
+Build the site locally with:
+
+```bash
+pip install -e ".[docs]" && mkdocs serve
+```
+
 ## License
 
 MIT

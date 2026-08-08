@@ -9,6 +9,9 @@ node_modules/
 states/
 *_TTrace_*.tla
 
+# mkdocs build output
+site/
+
 # JupyterLite build outputs and build venv
 lite-dist/
 lite/.jupyterlite.doit.db

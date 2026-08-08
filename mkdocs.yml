@@ -1,0 +1,56 @@
+site_name: tlakit
+site_description: A Python and notebook client for the TLA+ toolchain
+repo_url: https://github.com/LUC-AI4FM/tlakit
+docs_dir: docs
+site_dir: site
+
+# Only the reference is a site. `docs/` also holds operational notes
+# (deploy-runner, releasing) and the design records under `superpowers/`,
+# which are for people working on tlakit rather than people using it --
+# exclude them rather than publishing half-finished planning as documentation.
+exclude_docs: |
+  spike/
+  superpowers/
+  deploy-runner.md
+  releasing.md
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle: { icon: material/weather-night, name: Dark mode }
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle: { icon: material/weather-sunny, name: Light mode }
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            members_order: source
+            filters: ["!^_"]
+
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+
+nav:
+  - Reference: reference.md
+  - API: api.md
+
+# A warning here is a broken cross-reference or an orphaned page, both of
+# which are exactly the rot this build exists to catch. `mkdocs build
+# --strict` in CI turns them into a failure.
+strict: true

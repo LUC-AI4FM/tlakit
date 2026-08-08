@@ -151,11 +151,26 @@ def build_config(
 
 @dataclass
 class Spec:
-    """A TLA+ module held in memory."""
+    """A TLA+ module held in memory.
 
+    Build one with `load` (from a `.tla` file) or by constructing it directly
+    from source. `parse`, `check`, and `sweep` are the three things you can ask
+    of it; each returns a `CheckResult` (or, for `sweep`, a collection of
+    them) rather than raising on a failed check -- a spec that violates its
+    invariant is an answer, not an error.
+    """
+
+    #: The module text, verbatim. What gets written to `<name>.tla` in the
+    #: temporary working directory a run happens in.
     source: str
+    #: The module name, which must match the `---- MODULE Name ----` header:
+    #: SANY resolves a module by filename, so a mismatch is a parse error.
     name: str
+    #: Where `source` was read from, when it came from disk. Informational --
+    #: runs never execute in place, so nothing is written back here.
     path: Path | None = None
+    #: The runner to check with. None means `default_runner()` is resolved at
+    #: call time, which is what lets `use_remote()` redirect an existing Spec.
     runner: CliRunner | None = None
 
     def _runner(self) -> CliRunner:
@@ -268,26 +283,3 @@ def check_source(source: str, module: str | None = None, **kwargs: Any) -> Check
     """Check a spec that exists only as a string."""
     spec = Spec(source=source, name=module or module_name_of(source))
     return spec.check(**kwargs)
-
-    def sweep(
-        self,
-        grid: dict[str, Any],
-        *,
-        workers: int = 1,
-        **check_kwargs: Any,
-    ):
-        """Check this spec at every point in a grid of constants.
-
-        ```python
-        sweep = spec.sweep({"Servers": [3, 4, 5]}, invariants=["Inv"])
-        sweep.to_dataframe()
-        sweep.first_failure()
-        ```
-
-        `workers` runs points concurrently. It defaults to 1 because each point
-        is a separate JVM: five at once will ask for more memory than most
-        machines have. Pass `heap="2G"` alongside when raising it.
-        """
-        from .sweep import run_sweep
-
-        return run_sweep(self.check, grid, workers=workers, **check_kwargs)

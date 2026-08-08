@@ -178,6 +178,27 @@ class RemoteRunner:
             "so syntax errors surface from check()."
         )
 
+    def eval(
+        self,
+        expr: str,
+        modules: dict[str, str] | None = None,
+        timeout: float | None = None,
+    ):
+        """Not available remotely.
+
+        `%tla_eval` drives `tlc2.REPL`, which the service does not expose --
+        it accepts a spec and a config and nothing else. Without this the
+        magic reaches for a method that is simply absent and the browser
+        notebook gets `AttributeError: 'RemoteRunner' object has no attribute
+        'eval'`, which tells the reader nothing about what to do instead.
+        """
+        raise Unsupported(
+            "the remote runner cannot evaluate expressions; tlc2.REPL is not "
+            "exposed by the service. Express the value as an operator in a "
+            "module and check it as an INVARIANT, or install tlakit locally "
+            "with a JVM for the REPL."
+        )
+
     def check(
         self,
         source: str,

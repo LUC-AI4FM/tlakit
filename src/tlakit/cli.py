@@ -29,10 +29,17 @@ TRACE_FILE = "trace.json"
 GRAPH_FILE = "graph.dot"
 
 # A PlusCal source names its own translator with `--algorithm Name` or
-# `--fair algorithm Name` inside a `(* ... *)` comment; nothing else in a
-# spec legitimately contains that token, so a substring search is enough --
-# no need to parse the comment structure to find it.
+# `--fair algorithm Name` inside a `(* ... *)` comment. A bare substring
+# search over the whole file is not enough: a pure TLA+ spec can legitimately
+# contain a *string literal* like "run with --algorithm x", which is not a
+# PlusCal block and must not be misdetected as one (confirmed 2026-08-07: it
+# was, and got a bogus PARSE_ERROR instead of being checked). So string
+# literals are blanked out first -- a string can itself contain "(*"/"*)" --
+# and only the bodies of actual `(* ... *)` block comments are searched,
+# which is the one place +cal's own manual says an algorithm block may live.
 _PLUSCAL_ALGORITHM = re.compile(r"--(?:fair\s+)?algorithm\b")
+_STRING_LITERAL = re.compile(r'"(?:\\.|[^"\\])*"')
+_BLOCK_COMMENT = re.compile(r"\(\*.*?\*\)", re.DOTALL)
 
 # pcal.trans reports a failure as (verified 2026-08-07, pcal.trans 1.12):
 #
@@ -49,8 +56,12 @@ _PLUSCAL_ERROR = re.compile(
 
 
 def _is_pluscal(source: str) -> bool:
-    """Whether `source` embeds a PlusCal algorithm block."""
-    return _PLUSCAL_ALGORITHM.search(source) is not None
+    """Whether `source` embeds a genuine PlusCal algorithm block."""
+    without_strings = _STRING_LITERAL.sub(lambda m: " " * len(m.group(0)), source)
+    return any(
+        _PLUSCAL_ALGORITHM.search(comment)
+        for comment in _BLOCK_COMMENT.findall(without_strings)
+    )
 
 
 def _pluscal_diagnostics(stdout: str, exit_code: int | None) -> list[Diagnostic]:
@@ -99,8 +110,25 @@ _REPL_ERROR_PREFIX = "Error evaluating expression:"
 
 _MODULE_HEADER_LINE = re.compile(r"^-{4,}\s*MODULE\s+\w+\s*-{4,}\s*$", re.M)
 _MODULE_FOOTER_LINE = re.compile(r"^={4,}\s*$", re.M)
-_EXTENDS_LINE = re.compile(r"^[ \t]*EXTENDS\b.*$", re.M)
-_DECLARATION_LINE = re.compile(r"^[ \t]*(?:VARIABLES?|CONSTANTS?)\b.*$", re.M)
+
+# EXTENDS/VARIABLE/CONSTANT lists commonly wrap across lines:
+#
+#     EXTENDS Naturals,
+#             Sequences
+#
+# `\s` matches a newline, so `_DECL_ITEM`'s separators reach across the wrap
+# and the whole list is removed -- not just its first physical line, which
+# used to leave a bare orphaned `Sequences` spliced into the LET body and a
+# REPL syntax error on an otherwise-valid module. CONSTANT operators keep
+# their arity, e.g. `Foo(_, _)`.
+_IDENT = r"[A-Za-z_]\w*"
+_DECL_ITEM = rf"{_IDENT}(?:\([^)]*\))?"
+_EXTENDS_DECL = re.compile(
+    rf"^[ \t]*EXTENDS\b\s*(?:{_DECL_ITEM}\s*,\s*)*{_DECL_ITEM}", re.M
+)
+_VAR_CONST_DECL = re.compile(
+    rf"^[ \t]*(?:VARIABLES?|CONSTANTS?)\b\s*(?:{_DECL_ITEM}\s*,\s*)*{_DECL_ITEM}", re.M
+)
 
 
 def _operator_definitions(source: str) -> str:
@@ -113,8 +141,8 @@ def _operator_definitions(source: str) -> str:
     text = strip_comments(source)
     text = _MODULE_HEADER_LINE.sub("", text)
     text = _MODULE_FOOTER_LINE.sub("", text)
-    text = _EXTENDS_LINE.sub("", text)
-    text = _DECLARATION_LINE.sub("", text)
+    text = _EXTENDS_DECL.sub("", text)
+    text = _VAR_CONST_DECL.sub("", text)
     return text.strip()
 
 
@@ -154,6 +182,17 @@ def _repl_result(raw: RawOutput) -> EvalResult:
                     "for output.",
                 )
             ],
+            raw,
+        )
+    if not stdout:
+        # A real evaluation always prints something -- even the empty
+        # sequence prints "<<>>". Empty output is the REPL having gone
+        # silent for some other reason, not a legitimate empty value; the
+        # old behavior called this an ok, empty-string result.
+        return EvalResult(
+            Outcome.ERROR,
+            None,
+            [Diagnostic(Severity.ERROR, "tlc2.REPL produced no output; see result.raw.")],
             raw,
         )
     try:
@@ -305,11 +344,20 @@ class CliRunner:
             with _LIVE_LOCK:
                 _LIVE.discard(proc)
 
-    def _translate_pluscal(self, work: Path, module: str) -> RawOutput:
+    def _translate_pluscal(
+        self, work: Path, module: str, timeout: float | None
+    ) -> tuple[RawOutput, bool]:
         """Run `pcal.trans` over `<module>.tla`, which it rewrites in place.
 
         `-nocfg` keeps the translator from writing a .cfg: callers manage
         their own, and `check()` writes one before this ever runs.
+
+        `timeout` bounds the subprocess exactly like TLC's own: a spec merely
+        *containing* `--algorithm` plus a pathological algorithm block would
+        otherwise hang `pcal.trans` forever underneath `check()`'s untimed
+        call, which `check()`'s own `timeout` argument does not reach on its
+        own -- verified as a live way to wedge `serve/app.py`'s `/check`
+        route, which bounds the TLC step but, before this, nothing before it.
         """
         argv = [
             _java(),
@@ -319,24 +367,34 @@ class CliRunner:
             "-nocfg",
             f"{module}.tla",
         ]
-        raw, _ = self._run(argv, work, timeout=None)
-        return raw
+        return self._run(argv, work, timeout)
 
     def _prepare_source(
-        self, work: Path, module: str, source: str
+        self, work: Path, module: str, source: str, timeout: float | None = None
     ) -> tuple[str, CheckResult | None]:
         """Write `source` as `<module>.tla`, translating PlusCal first if present.
 
         pcal.trans ships inside tla2tools.jar, which every caller already
         requires -- no new dependency. Returns the text SANY/TLC will actually
         see (unchanged when there is no PlusCal block) and, on translator
-        failure, a `CheckResult` diagnosing it that the caller should return
-        immediately without ever invoking SANY or TLC.
+        failure or timeout, a `CheckResult` diagnosing it that the caller
+        should return immediately without ever invoking SANY or TLC.
         """
         (work / f"{module}.tla").write_text(source, encoding="utf-8")
         if not _is_pluscal(source):
             return source, None
-        raw = self._translate_pluscal(work, module)
+        raw, timed_out = self._translate_pluscal(work, module, timeout)
+        if timed_out:
+            diagnostics = [
+                Diagnostic(
+                    Severity.ERROR,
+                    f"PlusCal translation did not finish within {timeout}s.",
+                )
+            ]
+            failure = CheckResult(
+                Outcome.TIMEOUT, diagnostics, None, Stats(), raw, source=source,
+            )
+            return source, failure
         if raw.exit_code != 0:
             diagnostics = _pluscal_diagnostics(raw.stdout, raw.exit_code)
             failure = CheckResult(
@@ -346,15 +404,17 @@ class CliRunner:
         translated = (work / f"{module}.tla").read_text(encoding="utf-8")
         return translated, None
 
-    def parse(self, source: str, module: str) -> CheckResult:
+    def parse(self, source: str, module: str, timeout: float | None = None) -> CheckResult:
         """Syntax- and level-check a module with SANY.
 
         A PlusCal algorithm block is translated first -- SANY has no idea
         what one is and reports a syntax error that never mentions PlusCal.
+        `timeout` bounds that translation step; SANY itself remains untimed,
+        as before.
         """
         with tempfile.TemporaryDirectory(prefix="tlakit-") as tmp:
             work = Path(tmp)
-            source, failure = self._prepare_source(work, module, source)
+            source, failure = self._prepare_source(work, module, source, timeout=timeout)
             if failure is not None:
                 return failure
             argv = [
@@ -415,12 +475,14 @@ class CliRunner:
         A PlusCal algorithm block in `source` is translated before TLC ever
         sees it; `declared` (when not given explicitly) is then read from the
         *translated* text, which is where PlusCal's own `VARIABLES` clause and
-        `pc` bookkeeping variable actually live.
+        `pc` bookkeeping variable actually live. `timeout` bounds that
+        translation step too, not just the TLC step after it -- the two
+        subprocesses share the one wall-clock budget the caller asked for.
         """
         frames: list[str] = []
         with tempfile.TemporaryDirectory(prefix="tlakit-") as tmp:
             work = Path(tmp)
-            source, failure = self._prepare_source(work, module, source)
+            source, failure = self._prepare_source(work, module, source, timeout=timeout)
             if failure is not None:
                 return failure
             (work / f"{module}.cfg").write_text(config, encoding="utf-8")
@@ -472,7 +534,15 @@ class CliRunner:
                 ]
 
         if trace is not None:
-            trace = replace(trace, loop_start=parse_loop_start(raw.stdout))
+            # parse_loop_start only recognizes "Back to state N" (the lasso
+            # case). A text-mode trace may already carry its own loop_start
+            # from parse_text_trace, set when TLC instead prints "State N:
+            # Stuttering" -- overwriting it here with None would silently
+            # throw that away. The JSON path never sets loop_start on its
+            # own, so this is unconditional for it as before.
+            detected_loop = parse_loop_start(raw.stdout)
+            if detected_loop is not None:
+                trace = replace(trace, loop_start=detected_loop)
 
         if timed_out:
             _, diagnostics, stats = parse_tlc(raw.stdout, None)

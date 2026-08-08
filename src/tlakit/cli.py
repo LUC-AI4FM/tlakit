@@ -8,23 +8,201 @@ exit 255 (verified 2026-08-07).
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
 import threading
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 from .jar import find_community_jar, find_tools_jar
 from .parse import parse_loop_start, parse_sany, parse_tlc
 from .result import CheckResult, Diagnostic, Outcome, RawOutput, Severity, Stats
-from .source import declared_variables
-from .trace import load_trace
+from .source import declared_variables, strip_comments
+from .trace import TlaValueError, load_trace, parse_text_trace, parse_tla_value
 
 TRACE_FILE = "trace.json"
 GRAPH_FILE = "graph.dot"
+
+# A PlusCal source names its own translator with `--algorithm Name` or
+# `--fair algorithm Name` inside a `(* ... *)` comment. A bare substring
+# search over the whole file is not enough: a pure TLA+ spec can legitimately
+# contain a *string literal* like "run with --algorithm x", which is not a
+# PlusCal block and must not be misdetected as one (confirmed 2026-08-07: it
+# was, and got a bogus PARSE_ERROR instead of being checked). So string
+# literals are blanked out first -- a string can itself contain "(*"/"*)" --
+# and only the bodies of actual `(* ... *)` block comments are searched,
+# which is the one place +cal's own manual says an algorithm block may live.
+_PLUSCAL_ALGORITHM = re.compile(r"--(?:fair\s+)?algorithm\b")
+_STRING_LITERAL = re.compile(r'"(?:\\.|[^"\\])*"')
+_BLOCK_COMMENT = re.compile(r"\(\*.*?\*\)", re.DOTALL)
+
+# pcal.trans reports a failure as (verified 2026-08-07, pcal.trans 1.12):
+#
+#     Unrecoverable error:
+#      -- Expected "if" but found "algorithm"
+#         line 9, column 5.
+#
+# The location line is not always present (a missing algorithm block, for
+# example, has none).
+_PLUSCAL_ERROR = re.compile(
+    r"Unrecoverable error:\s*\n\s*--\s*(?P<message>[^\n]+)"
+    r"(?:\n\s*line (?P<line>\d+), column (?P<column>\d+)\.)?"
+)
+
+
+def _is_pluscal(source: str) -> bool:
+    """Whether `source` embeds a genuine PlusCal algorithm block."""
+    without_strings = _STRING_LITERAL.sub(lambda m: " " * len(m.group(0)), source)
+    return any(
+        _PLUSCAL_ALGORITHM.search(comment)
+        for comment in _BLOCK_COMMENT.findall(without_strings)
+    )
+
+
+def _pluscal_diagnostics(stdout: str, exit_code: int | None) -> list[Diagnostic]:
+    diags = [
+        Diagnostic(
+            Severity.ERROR,
+            f"PlusCal translation failed: {m.group('message').strip()}",
+            line=int(m.group("line")) if m.group("line") else None,
+            column=int(m.group("column")) if m.group("column") else None,
+        )
+        for m in _PLUSCAL_ERROR.finditer(stdout)
+    ]
+    if diags:
+        return diags
+    return [
+        Diagnostic(
+            Severity.ERROR,
+            f"PlusCal translation failed: pcal.trans exited with code "
+            f"{exit_code}; see result.raw for output.",
+        )
+    ]
+
+
+# --- %tla_eval / tlc2.REPL ---------------------------------------------------
+#
+# `java -cp tla2tools.jar tlc2.REPL "<expr>"` (a single argv, not stdin)
+# evaluates one constant-level expression and exits 0 whether or not it
+# succeeded (verified 2026-08-07, tlc2.REPL from TLC2 2026.07.31):
+#
+#     $ java -cp tla2tools.jar tlc2.REPL '1 + 1'
+#     2
+#     $ java -cp tla2tools.jar tlc2.REPL 'undefinedThing'
+#     Error evaluating expression: 'undefinedThing'
+#     [line 6, col 14 to line 6, col 27 of module tlarepl
+#
+#     Unknown operator: `undefinedThing'.]
+#
+# The REPL's own module-loading (`REPL.setSpecFile`) is a Java API, not a
+# command-line option -- there is no argv that puts another module's
+# operators in scope. So a prior module is spliced in as a `LET` ahead of
+# the expression instead: still the real REPL doing the evaluating, just
+# handed a bigger expression to evaluate. A LET cannot hold VARIABLE or
+# CONSTANT declarations, which matches the REPL only ever being
+# constant-level to begin with.
+_REPL_ERROR_PREFIX = "Error evaluating expression:"
+
+_MODULE_HEADER_LINE = re.compile(r"^-{4,}\s*MODULE\s+\w+\s*-{4,}\s*$", re.M)
+_MODULE_FOOTER_LINE = re.compile(r"^={4,}\s*$", re.M)
+
+# EXTENDS/VARIABLE/CONSTANT lists commonly wrap across lines:
+#
+#     EXTENDS Naturals,
+#             Sequences
+#
+# `\s` matches a newline, so `_DECL_ITEM`'s separators reach across the wrap
+# and the whole list is removed -- not just its first physical line, which
+# used to leave a bare orphaned `Sequences` spliced into the LET body and a
+# REPL syntax error on an otherwise-valid module. CONSTANT operators keep
+# their arity, e.g. `Foo(_, _)`.
+_IDENT = r"[A-Za-z_]\w*"
+_DECL_ITEM = rf"{_IDENT}(?:\([^)]*\))?"
+_EXTENDS_DECL = re.compile(
+    rf"^[ \t]*EXTENDS\b\s*(?:{_DECL_ITEM}\s*,\s*)*{_DECL_ITEM}", re.M
+)
+_VAR_CONST_DECL = re.compile(
+    rf"^[ \t]*(?:VARIABLES?|CONSTANTS?)\b\s*(?:{_DECL_ITEM}\s*,\s*)*{_DECL_ITEM}", re.M
+)
+
+
+def _operator_definitions(source: str) -> str:
+    """The operator-definition text of a module, for splicing into a LET.
+
+    Strips the module header/footer and the EXTENDS/VARIABLE/CONSTANT
+    declarations a LET cannot contain -- a LET may only hold operator,
+    function, and recursive definitions.
+    """
+    text = strip_comments(source)
+    text = _MODULE_HEADER_LINE.sub("", text)
+    text = _MODULE_FOOTER_LINE.sub("", text)
+    text = _EXTENDS_DECL.sub("", text)
+    text = _VAR_CONST_DECL.sub("", text)
+    return text.strip()
+
+
+@dataclass(frozen=True)
+class EvalResult:
+    """The result of `CliRunner.eval()`."""
+
+    outcome: Outcome
+    value: Any | None
+    diagnostics: list[Diagnostic]
+    raw: RawOutput
+
+    @property
+    def ok(self) -> bool:
+        return self.outcome is Outcome.OK
+
+    @property
+    def errors(self) -> list[Diagnostic]:
+        return [d for d in self.diagnostics if d.severity is Severity.ERROR]
+
+
+def _repl_result(raw: RawOutput) -> EvalResult:
+    stdout = raw.stdout.strip()
+    if stdout.startswith(_REPL_ERROR_PREFIX):
+        message = stdout[len(_REPL_ERROR_PREFIX):].strip()
+        return EvalResult(
+            Outcome.EVALUATION_ERROR, None, [Diagnostic(Severity.ERROR, message)], raw
+        )
+    if raw.exit_code not in (None, 0):
+        return EvalResult(
+            Outcome.ERROR,
+            None,
+            [
+                Diagnostic(
+                    Severity.ERROR,
+                    f"tlc2.REPL exited with code {raw.exit_code}; see result.raw "
+                    "for output.",
+                )
+            ],
+            raw,
+        )
+    if not stdout:
+        # A real evaluation always prints something -- even the empty
+        # sequence prints "<<>>". Empty output is the REPL having gone
+        # silent for some other reason, not a legitimate empty value; the
+        # old behavior called this an ok, empty-string result.
+        return EvalResult(
+            Outcome.ERROR,
+            None,
+            [Diagnostic(Severity.ERROR, "tlc2.REPL produced no output; see result.raw.")],
+            raw,
+        )
+    try:
+        value = parse_tla_value(stdout)
+    except TlaValueError:
+        # Still a successful evaluation -- just a value shape this reader
+        # does not understand yet. The caller gets the raw text rather than
+        # nothing.
+        value = stdout
+    return EvalResult(Outcome.OK, value, [], raw)
 
 
 class JavaNotFound(FileNotFoundError):
@@ -166,11 +344,79 @@ class CliRunner:
             with _LIVE_LOCK:
                 _LIVE.discard(proc)
 
-    def parse(self, source: str, module: str) -> CheckResult:
-        """Syntax- and level-check a module with SANY."""
+    def _translate_pluscal(
+        self, work: Path, module: str, timeout: float | None
+    ) -> tuple[RawOutput, bool]:
+        """Run `pcal.trans` over `<module>.tla`, which it rewrites in place.
+
+        `-nocfg` keeps the translator from writing a .cfg: callers manage
+        their own, and `check()` writes one before this ever runs.
+
+        `timeout` bounds the subprocess exactly like TLC's own: a spec merely
+        *containing* `--algorithm` plus a pathological algorithm block would
+        otherwise hang `pcal.trans` forever underneath `check()`'s untimed
+        call, which `check()`'s own `timeout` argument does not reach on its
+        own -- verified as a live way to wedge `serve/app.py`'s `/check`
+        route, which bounds the TLC step but, before this, nothing before it.
+        """
+        argv = [
+            _java(),
+            "-cp",
+            self._classpath(),
+            "pcal.trans",
+            "-nocfg",
+            f"{module}.tla",
+        ]
+        return self._run(argv, work, timeout)
+
+    def _prepare_source(
+        self, work: Path, module: str, source: str, timeout: float | None = None
+    ) -> tuple[str, CheckResult | None]:
+        """Write `source` as `<module>.tla`, translating PlusCal first if present.
+
+        pcal.trans ships inside tla2tools.jar, which every caller already
+        requires -- no new dependency. Returns the text SANY/TLC will actually
+        see (unchanged when there is no PlusCal block) and, on translator
+        failure or timeout, a `CheckResult` diagnosing it that the caller
+        should return immediately without ever invoking SANY or TLC.
+        """
+        (work / f"{module}.tla").write_text(source, encoding="utf-8")
+        if not _is_pluscal(source):
+            return source, None
+        raw, timed_out = self._translate_pluscal(work, module, timeout)
+        if timed_out:
+            diagnostics = [
+                Diagnostic(
+                    Severity.ERROR,
+                    f"PlusCal translation did not finish within {timeout}s.",
+                )
+            ]
+            failure = CheckResult(
+                Outcome.TIMEOUT, diagnostics, None, Stats(), raw, source=source,
+            )
+            return source, failure
+        if raw.exit_code != 0:
+            diagnostics = _pluscal_diagnostics(raw.stdout, raw.exit_code)
+            failure = CheckResult(
+                Outcome.PARSE_ERROR, diagnostics, None, Stats(), raw, source=source,
+            )
+            return source, failure
+        translated = (work / f"{module}.tla").read_text(encoding="utf-8")
+        return translated, None
+
+    def parse(self, source: str, module: str, timeout: float | None = None) -> CheckResult:
+        """Syntax- and level-check a module with SANY.
+
+        A PlusCal algorithm block is translated first -- SANY has no idea
+        what one is and reports a syntax error that never mentions PlusCal.
+        `timeout` bounds that translation step; SANY itself remains untimed,
+        as before.
+        """
         with tempfile.TemporaryDirectory(prefix="tlakit-") as tmp:
             work = Path(tmp)
-            (work / f"{module}.tla").write_text(source, encoding="utf-8")
+            source, failure = self._prepare_source(work, module, source, timeout=timeout)
+            if failure is not None:
+                return failure
             argv = [
                 _java(),
                 "-cp",
@@ -225,11 +471,20 @@ class CliRunner:
         module inherits its variables through EXTENDS and declares none of its
         own, so reading them from its text would find nothing and every alias
         field would be mistaken for state.
+
+        A PlusCal algorithm block in `source` is translated before TLC ever
+        sees it; `declared` (when not given explicitly) is then read from the
+        *translated* text, which is where PlusCal's own `VARIABLES` clause and
+        `pc` bookkeeping variable actually live. `timeout` bounds that
+        translation step too, not just the TLC step after it -- the two
+        subprocesses share the one wall-clock budget the caller asked for.
         """
         frames: list[str] = []
         with tempfile.TemporaryDirectory(prefix="tlakit-") as tmp:
             work = Path(tmp)
-            (work / f"{module}.tla").write_text(source, encoding="utf-8")
+            source, failure = self._prepare_source(work, module, source, timeout=timeout)
+            if failure is not None:
+                return failure
             (work / f"{module}.cfg").write_text(config, encoding="utf-8")
             for name, text in (extra_modules or {}).items():
                 (work / f"{name}.tla").write_text(text, encoding="utf-8")
@@ -254,6 +509,12 @@ class CliRunner:
             raw, timed_out = self._run(argv, work, timeout)
             names = declared if declared is not None else declared_variables(source)
             trace = load_trace(work / TRACE_FILE, names)
+            if trace is None:
+                # The dump can be missing without TLC having failed outright
+                # (path not writable, or -- per issue #4 -- a foreign log read
+                # by a caller other than tlakit itself). TLC's own printed
+                # trace, when present, is just as good a source.
+                trace = parse_text_trace(raw.stdout, names)
             state_graph = None
             if graph:
                 dot = work / GRAPH_FILE
@@ -273,7 +534,15 @@ class CliRunner:
                 ]
 
         if trace is not None:
-            trace = replace(trace, loop_start=parse_loop_start(raw.stdout))
+            # parse_loop_start only recognizes "Back to state N" (the lasso
+            # case). A text-mode trace may already carry its own loop_start
+            # from parse_text_trace, set when TLC instead prints "State N:
+            # Stuttering" -- overwriting it here with None would silently
+            # throw that away. The JSON path never sets loop_start on its
+            # own, so this is unconditional for it as before.
+            detected_loop = parse_loop_start(raw.stdout)
+            if detected_loop is not None:
+                trace = replace(trace, loop_start=detected_loop)
 
         if timed_out:
             _, diagnostics, stats = parse_tlc(raw.stdout, None)
@@ -294,3 +563,37 @@ class CliRunner:
             outcome, diagnostics, trace, stats, raw, source=source,
             frames=frames, graph=state_graph,
         )
+
+    def eval(
+        self,
+        expr: str,
+        modules: dict[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> EvalResult:
+        """Evaluate a constant TLA+ expression with `tlc2.REPL`.
+
+        `modules` are prior module sources (name -> text, as a notebook
+        session tracks them) `expr` may reference. Their operator definitions
+        are spliced ahead of it in a `LET` -- the REPL still does the actual
+        evaluating; this only assembles the expression handed to it. An
+        evaluation error comes back as a diagnostic on the result rather than
+        raising: `1 \\div 0` is a legitimate thing to ask the REPL and get a
+        clear "no" from, not a reason to blow up the caller.
+        """
+        prelude = "\n".join(
+            defs
+            for defs in (_operator_definitions(text) for text in (modules or {}).values())
+            if defs
+        )
+        full_expr = f"LET {prelude} IN\n{expr}" if prelude else expr
+        argv = [_java(), "-cp", self._classpath(), "tlc2.REPL", full_expr]
+        with tempfile.TemporaryDirectory(prefix="tlakit-") as tmp:
+            raw, timed_out = self._run(argv, Path(tmp), timeout)
+        if timed_out:
+            return EvalResult(
+                Outcome.TIMEOUT,
+                None,
+                [Diagnostic(Severity.ERROR, f"tlc2.REPL did not finish within {timeout}s.")],
+                raw,
+            )
+        return _repl_result(raw)

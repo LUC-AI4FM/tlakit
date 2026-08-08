@@ -506,11 +506,11 @@ def test_the_check_budget_covers_the_browser_tutorial():
     from tlakit.serve.limiter import CHECK_RULES, RateLimiter
 
     per_minute = next(rule for rule in CHECK_RULES if rule.window == 60)
-    assert per_minute.limit >= 20, "a visitor following the tutorial trips this"
+    assert per_minute.limit >= 12, "a visitor following the tutorial trips this"
 
     limiter = RateLimiter(rules=CHECK_RULES)
-    # Twenty checks in one burst: a tutorial run plus edits and re-runs.
-    assert all(limiter.check("visitor", now=100.0) is None for _ in range(20))
+    # The page runs four checks; a dozen covers that plus edits and re-runs.
+    assert all(limiter.check("visitor", now=100.0) is None for _ in range(12))
 
 
 def test_an_hourly_ceiling_still_stops_sustained_hammering():

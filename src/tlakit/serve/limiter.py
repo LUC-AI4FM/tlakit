@@ -43,13 +43,17 @@ class Rule:
 #: run at once no matter what any single client is allowed to ask for. With a
 #: 30-second cap per check, that ceiling is ~4 checks/minute of actual CPU
 #: whether this number is 6 or 60. What the per-minute rule actually does is
-#: stop one address monopolising those two slots, and 30 leaves room for a
-#: person working while still refusing a script.
+#: stop one address monopolising those two slots.
 #:
-#: The hourly ceiling is the one that matters for sustained abuse, so it stays
-#: proportionally tighter: 300/hour is ten minutes of continuous work, not ten
-#: hours of it.
-CHECK_RULES = (Rule(limit=30, window=60), Rule(limit=300, window=3600))
+#: 12/minute is a check every five seconds sustained, which is faster than a
+#: person reads a counterexample and comfortably absorbs a tutorial run plus
+#: edits and re-runs. It is deliberately not larger: the gate makes a bigger
+#: number safe for the *machine*, but a small one keeps a single tab from
+#: pushing everyone else onto the 503 path.
+#:
+#: The hourly ceiling matters for sustained abuse rather than for bursts:
+#: 200/hour is about seventeen minutes of continuous work.
+CHECK_RULES = (Rule(limit=12, window=60), Rule(limit=200, window=3600))
 #: The page and health endpoint are cheap, but not free, and an open redirect of
 #: traffic through them would still cost bandwidth.
 CHEAP_RULES = (Rule(limit=120, window=60),)

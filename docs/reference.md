@@ -58,6 +58,7 @@ environment variable, then the platformdirs cache that `tlakit.install` writes.
 | `TLAKIT_JAVA` | `tlakit.cli.java_executable` | Path to a `java` binary, overriding `PATH`. For a machine with several JVMs where the first on `PATH` is the wrong one. |
 | `TLAKIT_SERVE_KEY` | `tlakit.serve.app` | Shared secret required on requests to a `tlakit.serve` instance. Unset means the service is unauthenticated, which is only appropriate behind something else that authenticates. |
 | `TLAKIT_APALACHE` | `tlakit.apalache.find_apalache` | Path to the `apalache-mc` launcher, overriding `PATH`. Apalache is a 180 MB tarball rather than a jar, so `tlakit.install` does not fetch it — this is how you point at your own. |
+| `TLAKIT_TLAPM` | `tlakit.tlaps.find_tlapm` | Path to the `tlapm` binary. TLAPS is a 1.1 GB download unpacking to ~3 GB (it bundles Isabelle), so `tlakit.install` does not fetch it. On Apple Silicon you need the `arm64-darwin` asset from the `1.6.0-pre` release — the 1.5.0 installers are i386 and will not run. |
 | `TLAKIT_SERVE_KEY_FILE` | `tlakit.serve.app` | Path to a file holding that secret, for keeping it out of the process environment. Takes precedence over `TLAKIT_SERVE_KEY`. |
 
 `TLAKIT_TLA2TOOLS` and `TLAKIT_COMMUNITY_MODULES` are also scrubbed from any

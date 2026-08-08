@@ -15,6 +15,7 @@ per-step data, it just has no JS half and falls back to the static
 """
 from __future__ import annotations
 
+import textwrap
 from html import escape
 from typing import TYPE_CHECKING, Any
 
@@ -67,12 +68,54 @@ _CSS = """
 #: state with no successor -- so a terminating algorithm trips this check every
 #: time. Saying only "Deadlock reached" sends that reader hunting for a bug
 #: that is not there, and says nothing to the reader whose bug is real.
+#:
+#: Held as plain prose so both renderers can say it. The HTML view marks the
+#: code spans up on the way out (`_prose_html`); the text view wraps it
+#: (`_wrap`). Two copies of this paragraph would drift the moment either the
+#: flag or the wording changed.
 _DEADLOCK_HINT = (
     "A state with no successor. That is a real deadlock only if this "
     "specification was not meant to terminate — TLC cannot tell the two apart. "
-    "If it was, turn the check off: <code>CHECK_DEADLOCK FALSE</code> in the "
-    "config, or <code>check_deadlock=False</code> from Python."
+    "If it was, turn the check off: CHECK_DEADLOCK FALSE in the "
+    "config, or check_deadlock=False from Python."
 )
+
+#: Substrings of the prose above that name code rather than English, and so
+#: want <code> in the HTML view. Plain text leaves them as they are.
+_CODE_SPANS = ("CHECK_DEADLOCK FALSE", "check_deadlock=False")
+
+
+def _unused_actions_note(unused: list[str]) -> str:
+    """The never-enabled warning, as prose. Shared for the same reason the
+    deadlock hint is."""
+    return (
+        f"Never enabled: {', '.join(unused)}. An action that never fires "
+        "means the specification may be passing for the wrong reason."
+    )
+
+
+def _prose_html(text: str) -> str:
+    """Escape prose, then re-mark the code spans. Escaping first means the
+    prose can never smuggle markup in; only the fixed spans above come back."""
+    out = escape(text)
+    for span in _CODE_SPANS:
+        out = out.replace(escape(span), f"<code>{escape(span)}</code>")
+    return out
+
+
+def _wrap(label: str, text: str, indent: str = "  ", width: int = 79) -> str:
+    """One labelled paragraph, wrapped to a terminal and hanging-indented
+    under its own label. Long words and hyphens are left alone: these lines
+    carry identifiers and paths, and breaking those makes them uncopyable."""
+    prefix = f"{indent}{label}"
+    return textwrap.fill(
+        text,
+        width=width,
+        initial_indent=prefix,
+        subsequent_indent=" " * len(prefix),
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
 
 _HEADLINE = {
     Outcome.OK: "No error has been found.",
@@ -106,12 +149,8 @@ def _stats_html(result: CheckResult) -> str:
         out = f'<div class="tlakit-stats">{escape(", ".join(bits))}</div>'
     unused = result.stats.unused_actions
     if unused:
-        names = escape(", ".join(unused))
-        out += (
-            '<div class="tlakit-banner tlakit-bad">Never enabled: '
-            f"{names}. An action that never fires means the specification may "
-            "be passing for the wrong reason.</div>"
-        )
+        note = _prose_html(_unused_actions_note(unused))
+        out += f'<div class="tlakit-banner tlakit-bad">{note}</div>'
     return out
 
 
@@ -218,9 +257,8 @@ def result_html(result: CheckResult, source: str | None = None) -> str:
         f'<div class="tlakit-banner {banner}">{escape(headline)}</div>',
     ]
     if result.outcome is Outcome.DEADLOCK:
-        # Not escaped: the hint is a fixed string in this module and carries
-        # its own markup.
-        parts.append(f'<div class="tlakit-hint">{_DEADLOCK_HINT}</div>')
+        hint = _prose_html(_DEADLOCK_HINT)
+        parts.append(f'<div class="tlakit-hint">{hint}</div>')
     parts.append(_diagnostics_html(result))
     if source is not None:
         parts.append(_source_html(source, result))
@@ -630,27 +668,18 @@ def result_text(result: CheckResult) -> str:
 
     parts = [status_line]
 
-    # 2. Diagnostics
+    # 2. Diagnostics. Every one of these is prose and so gets wrapped -- an
+    # unwrapped paragraph here is the exact thing __str__ exists to fix.
     diagnostics_lines = []
     for d in result.diagnostics:
-        diagnostics_lines.append(f"  {d.severity.value}: {d}")
+        diagnostics_lines.append(_wrap(f"{d.severity.value}: ", str(d)))
 
     if result.outcome is Outcome.DEADLOCK:
-        hint_text = (
-            "A state with no successor. That is a real deadlock only if this "
-            "specification was not meant to terminate \u2014 TLC cannot tell the two apart. "
-            "If it was, turn the check off: CHECK_DEADLOCK FALSE in the "
-            "config, or check_deadlock=False from Python."
-        )
-        diagnostics_lines.append(f"  Note: {hint_text}")
+        diagnostics_lines.append(_wrap("Note: ", _DEADLOCK_HINT))
 
     unused = result.stats.unused_actions
     if unused:
-        names = ", ".join(unused)
-        diagnostics_lines.append(
-            f"  warning: Never enabled: {names}. An action that never fires means "
-            "the specification may be passing for the wrong reason."
-        )
+        diagnostics_lines.append(_wrap("warning: ", _unused_actions_note(unused)))
 
     if diagnostics_lines:
         parts.append("\n".join(diagnostics_lines))

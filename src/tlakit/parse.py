@@ -44,6 +44,14 @@ _TLC_BACK_TO_STATE = re.compile(r"^Back to state (\d+)\b", re.M)
 # it. tlakit passes -dumpTrace on every run, so an old jar fails every check
 # with an exit code that is not even in TLC's own table.
 _TLC_UNRECOGNIZED = re.compile(r"unrecognized option: (\S+)")
+# ``Cannot find source file for module IOUtils imported in module E``
+# SANY reports a missing EXTENDS this way, with no line or column. Without a
+# pattern for it the outcome is parse_error carrying no diagnostics at all,
+# which is what a public client saw when it tried to EXTENDS IOUtils.
+_SANY_MISSING_MODULE = re.compile(
+    r"^Cannot find source file for module (\w+)(?: imported in module (\w+))?",
+    re.M,
+)
 _TLC_VERSION = re.compile(r"^(TLC2 Version \S+)", re.M)
 
 # ``<Bump line 5, col 1 to line 5, col 4 of module C>: 3:4``
@@ -90,6 +98,16 @@ def parse_sany(stdout: str) -> list[Diagnostic]:
         diags.append(
             Diagnostic(
                 Severity.ERROR, message.strip(), line=int(line), column=int(column)
+            )
+        )
+    for missing, importer in _SANY_MISSING_MODULE.findall(stdout):
+        where = f" imported in module {importer}" if importer else ""
+        diags.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"Cannot find module {missing}{where}. It is not a standard "
+                "module and is not available here.",
+                module=importer or None,
             )
         )
     for line, column, module, message in _SANY_SEMANTIC.findall(stdout):

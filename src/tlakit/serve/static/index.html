@@ -1,0 +1,690 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tla-runner — check a TLA⁺ specification</title>
+<meta name="description" content="Paste a TLA+ specification and model-check it. Specifications run without I/O primitives.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#f4f1ea;
+    --paper-deep:#eae5da;
+    --ink:#17150f;
+    --ink-soft:#5b564a;
+    --rule:rgba(23,21,15,.14);
+    --rule-faint:rgba(23,21,15,.06);
+    --violation:#c1402a;
+    --violation-wash:rgba(193,64,42,.09);
+    --sound:#2c6248;
+    --sound-wash:rgba(44,98,72,.10);
+    --mark:#b8862a;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --display:"Instrument Serif",Georgia,serif;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;background:var(--paper);color:var(--ink);
+    font:400 14px/1.65 var(--mono);
+    /* graph paper, faint enough to read as texture rather than pattern */
+    background-image:
+      linear-gradient(var(--rule-faint) 1px,transparent 1px),
+      linear-gradient(90deg,var(--rule-faint) 1px,transparent 1px);
+    background-size:28px 28px,28px 28px;
+    background-position:-1px -1px;
+  }
+  .shell{max-width:1180px;margin:0 auto;padding:0 28px 96px}
+
+  /* ── masthead ─────────────────────────────────────────── */
+  header{padding:72px 0 40px;border-bottom:1px solid var(--rule);position:relative}
+  .eyebrow{
+    font-size:11px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--ink-soft);margin:0 0 18px;
+  }
+  h1{
+    font:400 clamp(46px,8vw,92px)/.94 var(--display);
+    margin:0;letter-spacing:-.015em;
+  }
+  h1 em{font-style:italic;color:var(--violation)}
+  .lede{
+    max-width:62ch;margin:22px 0 0;font-size:14.5px;color:var(--ink-soft);
+  }
+  .lede strong{color:var(--ink);font-weight:500}
+  .guarantee{
+    margin-top:26px;padding:12px 16px;border-left:2px solid var(--mark);
+    background:rgba(184,134,42,.07);font-size:13px;max-width:62ch;
+  }
+
+  /* staggered entrance — one orchestrated load, not scattered fidgets */
+  .rise{opacity:0;transform:translateY(10px);animation:rise .7s cubic-bezier(.2,.7,.2,1) forwards}
+  @keyframes rise{to{opacity:1;transform:none}}
+  header .eyebrow{animation-delay:.02s}
+  header h1{animation-delay:.09s}
+  header .lede{animation-delay:.18s}
+  header .guarantee{animation-delay:.26s}
+  .composer{animation-delay:.32s}
+
+  /* ── composer ─────────────────────────────────────────── */
+  .composer{display:grid;grid-template-columns:1.55fr .95fr;gap:0;margin-top:44px;
+            border:1px solid var(--rule);background:var(--paper)}
+  .pane{padding:0}
+  .pane + .pane{border-left:1px solid var(--rule)}
+  .pane-head{
+    display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+    padding:13px 16px;border-bottom:1px solid var(--rule);
+    font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft);
+  }
+  .pane-head b{font-weight:500;color:var(--ink);letter-spacing:.16em}
+  textarea{
+    display:block;width:100%;border:0;background:transparent;resize:vertical;
+    font:400 13px/1.75 var(--mono);color:var(--ink);padding:16px;
+    outline:none;tab-size:2;
+  }
+  textarea::placeholder{color:rgba(23,21,15,.3)}
+  #spec{min-height:340px}
+  #config{min-height:150px}
+  .examples{display:flex;flex-wrap:wrap;gap:6px;padding:0 16px 14px}
+  .chip{
+    font:400 11.5px/1 var(--mono);letter-spacing:.02em;
+    padding:7px 10px;border:1px solid var(--rule);background:transparent;
+    color:var(--ink-soft);cursor:pointer;transition:.16s;
+  }
+  .chip:hover{border-color:var(--ink);color:var(--ink);background:var(--paper-deep)}
+  .actions{padding:14px 16px;border-top:1px solid var(--rule);
+           display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  button.run{
+    font:500 12px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;
+    padding:13px 22px;border:1px solid var(--ink);background:var(--ink);color:var(--paper);
+    cursor:pointer;transition:.18s;
+  }
+  button.run:hover:not(:disabled){background:var(--violation);border-color:var(--violation)}
+  button.run:disabled{opacity:.45;cursor:default}
+  .hint{font-size:11.5px;color:var(--ink-soft)}
+  kbd{font:400 11px/1 var(--mono);border:1px solid var(--rule);padding:3px 5px;
+      background:var(--paper-deep)}
+
+  /* ── result ───────────────────────────────────────────── */
+  #out{margin-top:34px}
+  .verdict{
+    display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;
+    padding:18px 20px;border:1px solid var(--rule);border-left-width:3px;
+  }
+  .verdict.bad{border-left-color:var(--violation);background:var(--violation-wash)}
+  .verdict.good{border-left-color:var(--sound);background:var(--sound-wash)}
+  .verdict h2{margin:0;font:400 clamp(22px,3.4vw,34px)/1.1 var(--display)}
+  .verdict .stats{font-size:12px;color:var(--ink-soft);letter-spacing:.02em}
+  .diags{margin:0;padding:14px 20px;border:1px solid var(--rule);border-top:0;
+         list-style:none;font-size:13px}
+  .diags li{padding:4px 0}
+  .diags .loc{color:var(--violation);font-weight:500}
+
+  .ladder{margin-top:26px;border:1px solid var(--rule);overflow-x:auto}
+  .ladder-head{padding:13px 16px;border-bottom:1px solid var(--rule);
+    font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft)}
+  table{border-collapse:collapse;width:100%;font-size:12.5px}
+  th,td{text-align:left;padding:9px 14px;border-bottom:1px solid var(--rule-faint);
+        white-space:nowrap;vertical-align:top}
+  thead th{font-weight:500;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+           color:var(--ink-soft);border-bottom:1px solid var(--rule)}
+  tbody tr{opacity:0;animation:step .38s ease forwards}
+  @keyframes step{to{opacity:1}}
+  .step{color:var(--ink-soft);width:1%}
+  .action{color:var(--ink);font-weight:500}
+  .action.initial{color:var(--ink-soft);font-weight:400;font-style:italic}
+  td.changed{background:rgba(184,134,42,.16);font-weight:500;
+             box-shadow:inset 2px 0 0 var(--mark)}
+  .loopnote{padding:11px 16px;border-top:1px solid var(--rule);
+            font-size:12px;color:var(--ink-soft);font-style:italic}
+
+
+  /* ── state space ──────────────────────────────────────── */
+  .figure{margin-top:26px;border:1px solid var(--rule);background:var(--paper)}
+  .figure-head{padding:13px 16px;border-bottom:1px solid var(--rule);
+    display:flex;justify-content:space-between;align-items:baseline;gap:14px;flex-wrap:wrap;
+    font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft)}
+  .figure-head b{color:var(--ink);font-weight:500;letter-spacing:.16em}
+  .legend{display:flex;gap:16px;font-size:10.5px;letter-spacing:.08em;align-items:center}
+  .legend i{display:inline-block;width:9px;height:9px;margin-right:5px;vertical-align:-1px}
+  .legend .i-init{background:var(--ink)}
+  .legend .i-path{background:var(--violation)}
+  .legend .i-other{background:transparent;border:1px solid var(--rule)}
+  /* An SVG with width:100% takes its height from the aspect ratio, which for a
+     deep graph is enormous. Cap it and let preserveAspectRatio letterbox. */
+  #graph{display:block;width:100%;height:auto;max-height:min(72vh,620px);cursor:grab}
+  #graph:active{cursor:grabbing}
+  #graph .edge{stroke:var(--rule);stroke-width:1;fill:none}
+  #graph .edge.on-path{stroke:var(--violation);stroke-width:2}
+  #graph .node{fill:var(--paper);stroke:var(--rule);stroke-width:1;transition:.14s}
+  #graph .node.initial{fill:var(--ink);stroke:var(--ink)}
+  #graph .node.on-path{stroke:var(--violation);stroke-width:2}
+  #graph .node.terminal{fill:var(--violation);stroke:var(--violation)}
+  #graph g.state{cursor:pointer}
+  #graph g.state:hover .node{stroke:var(--ink);stroke-width:2}
+  #graph .rank-label{fill:var(--ink-soft);font:400 9px var(--mono);letter-spacing:.1em}
+  #graph .edge-label{fill:var(--violation);font:500 9.5px var(--mono)}
+  #graph .step-badge{fill:var(--paper);font:500 9px var(--mono)}
+  .inspector{border-top:1px solid var(--rule);padding:13px 16px;font-size:12px;
+    min-height:44px;display:flex;gap:22px;flex-wrap:wrap;align-items:baseline}
+  .inspector .k{color:var(--ink-soft)}
+  .inspector .v{font-weight:500}
+  .inspector .empty{color:var(--ink-soft);font-style:italic}
+
+  /* ── variable lanes ───────────────────────────────────── */
+  .lanes{padding:6px 0 14px;overflow-x:auto}
+  .lane{display:grid;grid-template-columns:120px 1fr;align-items:center;
+        border-top:1px solid var(--rule-faint)}
+  .lane:first-child{border-top:0}
+  .lane-name{padding:9px 16px;font-size:11.5px;color:var(--ink-soft);
+             border-right:1px solid var(--rule-faint);white-space:nowrap}
+  .lane-track{display:flex;min-width:max-content}
+  .cell{flex:0 0 auto;min-width:96px;padding:9px 12px;font-size:11.5px;
+        border-right:1px solid var(--rule-faint);white-space:nowrap}
+  .cell.hold{color:var(--ink-soft)}
+  .cell.change{background:rgba(184,134,42,.16);font-weight:500;
+               box-shadow:inset 2px 0 0 var(--mark)}
+  .lane-ruler{display:grid;grid-template-columns:120px 1fr;
+              border-bottom:1px solid var(--rule)}
+  .lane-ruler .lane-name{color:var(--ink);font-weight:500}
+  .tick{flex:0 0 auto;min-width:96px;padding:8px 12px;font-size:10px;
+        letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft);
+        border-right:1px solid var(--rule-faint);white-space:nowrap}
+
+  footer{margin-top:70px;padding-top:22px;border-top:1px solid var(--rule);
+         font-size:11.5px;color:var(--ink-soft);
+         display:flex;gap:26px;flex-wrap:wrap;justify-content:space-between}
+  footer a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--rule)}
+  footer a:hover{border-bottom-color:var(--ink)}
+  .limits{display:flex;gap:18px;flex-wrap:wrap}
+
+  @media (max-width:860px){
+    .composer{grid-template-columns:1fr}
+    .pane + .pane{border-left:0;border-top:1px solid var(--rule)}
+    .shell{padding:0 18px 64px}
+    header{padding:48px 0 30px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .rise,tbody tr{animation:none;opacity:1;transform:none}
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+<header>
+  <p class="eyebrow rise">tlakit · LUC-AI4FM</p>
+  <h1 class="rise">Check a<br>TLA⁺ <em>specification</em>.</h1>
+  <p class="lede rise">
+    Paste a module, name an invariant, and TLC will look for a behaviour that breaks it.
+    If it finds one you get the <strong>counterexample</strong> — every state, the action
+    that caused each step, and which variables changed.
+  </p>
+  <p class="guarantee rise">
+    Specifications run with <strong>tla2tools alone</strong>. The standard modules are pure,
+    so a spec submitted here has no way to read a file, open a socket, or run a command.
+  </p>
+</header>
+
+<section class="composer rise">
+  <div class="pane">
+    <div class="pane-head"><b>Specification</b><span>module</span></div>
+    <textarea id="spec" spellcheck="false" placeholder="---- MODULE Example ----&#10;EXTENDS Naturals&#10;VARIABLE x&#10;Init == x = 0&#10;Next == x' = x + 1&#10;Spec == Init /\ [][Next]_x&#10;Inv  == x < 3&#10;===="></textarea>
+    <div class="examples">
+      <button class="chip" data-example="microwave">microwave · safety</button>
+      <button class="chip" data-example="diehard">die hard · jugs</button>
+      <button class="chip" data-example="counter">counter · sound</button>
+      <button class="chip" data-example="liveness">liveness · lasso</button>
+    </div>
+  </div>
+  <div class="pane">
+    <div class="pane-head"><b>Configuration</b><span>.cfg</span></div>
+    <textarea id="config" spellcheck="false" placeholder="SPECIFICATION Spec&#10;INVARIANT Inv"></textarea>
+    <div class="actions">
+      <button class="run" id="run">Check</button>
+      <label class="hint" style="display:flex;gap:6px;align-items:center;cursor:pointer">
+        <input type="checkbox" id="wantGraph" checked> state space
+      </label>
+      <span class="hint"><kbd>⌘</kbd> <kbd>↵</kbd> to run</span>
+    </div>
+    <div class="actions" style="border-top:0;padding-top:0">
+      <span class="hint" id="status"></span>
+    </div>
+  </div>
+</section>
+
+<div id="out"></div>
+
+<footer>
+  <span>Model checked by <a href="https://github.com/tlaplus/tlaplus">TLC</a>,
+        served by <a href="https://github.com/LUC-AI4FM/tlakit">tlakit</a>.</span>
+  <span class="limits">
+    <span>64 KB max</span><span>30 s cap</span><span>2 at a time</span>
+  </span>
+</footer>
+
+</div>
+
+<script>
+const EXAMPLES = {
+  microwave: {
+    spec: `---- MODULE Microwave ----
+EXTENDS Naturals
+VARIABLES door, radiation
+vars == <<door, radiation>>
+
+Init == door = "closed" /\\ radiation = "off"
+
+\\* Opening the door does not stop the radiation. That is the bug.
+Open  == door' = "open"   /\\ UNCHANGED radiation
+Close == door' = "closed" /\\ UNCHANGED radiation
+Start == radiation' = "on" /\\ UNCHANGED door
+
+Next == Open \\/ Close \\/ Start
+Spec == Init /\\ [][Next]_vars
+
+Safety == radiation = "on" => door = "closed"
+====`,
+    config: `SPECIFICATION Spec\nINVARIANT Safety` },
+
+  diehard: {
+    spec: `---- MODULE DieHard ----
+EXTENDS Naturals
+VARIABLES big, small
+
+Init == big = 0 /\\ small = 0
+
+FillBig    == big' = 5 /\\ UNCHANGED small
+FillSmall  == small' = 3 /\\ UNCHANGED big
+EmptyBig   == big' = 0 /\\ UNCHANGED small
+EmptySmall == small' = 0 /\\ UNCHANGED big
+
+BigToSmall ==
+  LET poured == IF big + small > 3 THEN 3 - small ELSE big
+  IN big' = big - poured /\\ small' = small + poured
+
+SmallToBig ==
+  LET poured == IF big + small > 5 THEN 5 - big ELSE small
+  IN big' = big + poured /\\ small' = small - poured
+
+Next == FillBig \\/ FillSmall \\/ EmptyBig \\/ EmptySmall
+        \\/ BigToSmall \\/ SmallToBig
+Spec == Init /\\ [][Next]_<<big, small>>
+
+\\* Claim there is no way to measure 4. TLC disagrees.
+NotFour == big /= 4
+====`,
+    config: `SPECIFICATION Spec\nINVARIANT NotFour` },
+
+  counter: {
+    spec: `---- MODULE Counter ----
+EXTENDS Naturals
+VARIABLE x
+Init == x = 0
+Next == IF x < 2 THEN x' = x + 1 ELSE x' = x
+Spec == Init /\\ [][Next]_x
+Inv  == x <= 2
+====`,
+    config: `SPECIFICATION Spec\nINVARIANT Inv` },
+
+  liveness: {
+    spec: `---- MODULE Cycle ----
+EXTENDS Naturals
+VARIABLE x
+Init == x = 0
+Next == x' = (x + 1) % 3
+Spec == Init /\\ [][Next]_x /\\ WF_x(Next)
+
+\\* Never settles on 1, so this is violated by a cycle.
+Eventually == <>[](x = 1)
+====`,
+    config: `SPECIFICATION Spec\nPROPERTY Eventually` },
+};
+
+const $ = (s) => document.querySelector(s);
+const spec = $("#spec"), config = $("#config"), out = $("#out"),
+      run = $("#run"), status = $("#status");
+
+document.querySelectorAll(".chip").forEach((chip) =>
+  chip.addEventListener("click", () => {
+    const ex = EXAMPLES[chip.dataset.example];
+    spec.value = ex.spec;
+    config.value = ex.config;
+    out.innerHTML = "";
+    status.textContent = "";
+    spec.scrollTop = 0;
+  }));
+
+const esc = (s) => String(s).replace(/[&<>"]/g,
+  (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+const show = (v) =>
+  typeof v === "string" ? `"${v}"` :
+  v === null ? "null" :
+  typeof v === "object" ? JSON.stringify(v) : String(v);
+
+const HEADLINE = {
+  ok: "No error found.",
+  invariant_violation: "Invariant violated.",
+  deadlock: "Deadlock reached.",
+  temporal_violation: "Temporal property violated.",
+  assumption_violation: "An ASSUME was violated.",
+  assertion_failed: "An assertion failed.",
+  parse_error: "The specification did not parse.",
+  config_error: "The configuration did not parse.",
+  evaluation_error: "TLC could not evaluate the specification.",
+  state_space_too_large: "The state space is too large.",
+  timeout: "Timed out; results are partial.",
+  error: "The tool reported an error.",
+};
+
+
+/* ── state-space figure ───────────────────────────────────────────────────
+   Layered by distance from an initial state, which is the only layout that
+   means anything here: rank is BFS depth, so vertical position is "how many
+   steps in". A force simulation would look busier and say less.            */
+
+function layout(graph) {
+  const nodes = new Map(graph.nodes.map((n) => [n.id, { ...n, rank: null }]));
+  const out = new Map();
+  graph.edges.forEach((e) => {
+    if (!out.has(e.from)) out.set(e.from, []);
+    out.get(e.from).push(e);
+  });
+
+  let frontier = graph.nodes.filter((n) => n.initial).map((n) => n.id);
+  if (!frontier.length) frontier = [graph.nodes[0].id];
+  frontier.forEach((id) => (nodes.get(id).rank = 0));
+
+  for (let rank = 0; frontier.length; rank++) {
+    const next = [];
+    for (const id of frontier)
+      for (const e of out.get(id) || [])
+        if (nodes.get(e.to) && nodes.get(e.to).rank === null) {
+          nodes.get(e.to).rank = rank + 1;
+          next.push(e.to);
+        }
+    frontier = next;
+  }
+  // Unreachable in this traversal (shouldn't happen, but never drop a node).
+  let maxRank = 0;
+  nodes.forEach((n) => { if (n.rank !== null) maxRank = Math.max(maxRank, n.rank); });
+  nodes.forEach((n) => { if (n.rank === null) n.rank = maxRank + 1; });
+
+  const byRank = new Map();
+  nodes.forEach((n) => {
+    if (!byRank.has(n.rank)) byRank.set(n.rank, []);
+    byRank.get(n.rank).push(n);
+  });
+
+  const PAD = 44, ALONG = 86, ACROSS = 74;
+  const depth = Math.max(...byRank.keys());
+  const widest = Math.max(...[...byRank.values()].map((r) => r.length));
+  // Deep-and-narrow graphs (a long trace through few branches) become absurdly
+  // tall if rank always means "down". Run ranks left-to-right instead, which
+  // also reads the way a behaviour does.
+  const horizontal = depth > widest;
+
+  [...byRank.entries()].forEach(([rank, row]) => {
+    const span = (row.length - 1) * ACROSS;
+    const centre = PAD + (widest - 1) * ACROSS / 2;
+    row.forEach((n, i) => {
+      const along = PAD + rank * ALONG;
+      const across = centre - span / 2 + i * ACROSS;
+      n.x = horizontal ? along : across;
+      n.y = horizontal ? across : along;
+    });
+  });
+
+  const alongExtent = PAD * 2 + depth * ALONG;
+  const acrossExtent = PAD * 2 + Math.max(widest - 1, 1) * ACROSS;
+  return {
+    nodes, byRank, horizontal,
+    width: horizontal ? alongExtent : acrossExtent,
+    height: horizontal ? acrossExtent : alongExtent,
+  };
+}
+
+function renderGraph(graph) {
+  if (!graph || !graph.nodes || !graph.nodes.length) return "";
+  const L = layout(graph);
+  const path = graph.path || [];
+  const onPath = new Set(path);
+  const pathEdges = new Set();
+  for (let i = 1; i < path.length; i++) pathEdges.add(path[i - 1] + "→" + path[i]);
+  const stepOf = new Map(path.map((id, i) => [id, i + 1]));
+  const terminal = path.length ? path[path.length - 1] : null;
+
+  // Edges first so nodes sit on top.
+  const edges = graph.edges.map((e) => {
+    const a = L.nodes.get(e.from), b = L.nodes.get(e.to);
+    if (!a || !b) return "";
+    const hot = pathEdges.has(e.from + "→" + e.to);
+    let d;
+    if (a === b) {
+      d = `M${a.x} ${a.y - 11} C ${a.x + 26} ${a.y - 34}, ${a.x - 26} ${a.y - 34}, ${a.x} ${a.y - 11}`;
+    } else {
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      const bow = L.horizontal ? (b.y - a.y) * 0.14 : (b.x - a.x) * 0.14;
+      d = L.horizontal
+        ? `M${a.x} ${a.y} Q ${mx} ${my - bow} ${b.x} ${b.y}`
+        : `M${a.x} ${a.y} Q ${mx - bow} ${my} ${b.x} ${b.y}`;
+    }
+    return `<path class="edge${hot ? " on-path" : ""}" d="${d}"${
+      hot ? ' marker-end="url(#arrow-hot)"' : ' marker-end="url(#arrow)"'}></path>`;
+  }).join("");
+
+  // Label only the counterexample's transitions; labelling all of them is noise.
+  const labels = graph.edges.filter((e) =>
+    pathEdges.has(e.from + "→" + e.to)).map((e) => {
+      const a = L.nodes.get(e.from), b = L.nodes.get(e.to);
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      return `<text class="edge-label" x="${mx + 8}" y="${my - 3}">${esc(e.action)}</text>`;
+    }).join("");
+
+  const circles = [...L.nodes.values()].map((n) => {
+    const cls = ["node"];
+    if (n.initial) cls.push("initial");
+    if (onPath.has(n.id)) cls.push("on-path");
+    if (n.id === terminal && terminal !== null) cls.push("terminal");
+    const step = stepOf.get(n.id);
+    return `<g class="state" data-id="${esc(n.id)}">
+        <title>${esc(Object.entries(n.vars).map(([k, v]) => k + " = " + v).join("\n"))}</title>
+        <circle class="${cls.join(" ")}" cx="${n.x}" cy="${n.y}" r="11"></circle>
+        ${step ? `<text class="step-badge" x="${n.x}" y="${n.y + 3}" text-anchor="middle">${step}</text>` : ""}
+      </g>`;
+  }).join("");
+
+  const rulers = [...L.byRank.keys()].sort((a, b) => a - b).map((rank) => {
+    const at = 44 + rank * 86;
+    return L.horizontal
+      ? `<text class="rank-label" x="${at}" y="12" text-anchor="middle">${rank}</text>`
+      : `<text class="rank-label" x="6" y="${at + 3}">${rank}</text>`;
+  }).join("");
+
+  return `<div class="figure">
+    <div class="figure-head">
+      <b>State space</b>
+      <span class="legend">
+        <span><i class="i-init"></i>initial</span>
+        <span><i class="i-path"></i>counterexample</span>
+        <span><i class="i-other"></i>reachable</span>
+        <span>${graph.nodes.length} states · ${graph.edges.length} transitions${
+          graph.truncated ? " · truncated" : ""}</span>
+      </span>
+    </div>
+    <svg id="graph" viewBox="0 0 ${L.width} ${L.height + 20}"
+         preserveAspectRatio="xMidYMin meet" role="img"
+         aria-label="Reachable state graph with the counterexample highlighted">
+      <defs>
+        <marker id="arrow" viewBox="0 0 8 8" refX="15" refY="4" markerWidth="6"
+                markerHeight="6" orient="auto-start-reverse">
+          <path d="M0 0 L8 4 L0 8 z" fill="rgba(23,21,15,.26)"></path></marker>
+        <marker id="arrow-hot" viewBox="0 0 8 8" refX="14" refY="4" markerWidth="7"
+                markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L8 4 L0 8 z" fill="#c1402a"></path></marker>
+      </defs>
+      ${rulers}${edges}${labels}${circles}
+    </svg>
+    <div class="inspector" id="inspector">
+      <span class="empty">Hover or tap a state to read its variables.</span>
+    </div>
+  </div>`;
+}
+
+/* ── variable lanes ───────────────────────────────────────────────────────
+   One row per variable across the counterexample, so you can see which one
+   actually moves at each step. The ladder answers "what is the state"; this
+   answers "what is changing".                                              */
+
+function renderLanes(trace) {
+  if (!trace || !trace.states || trace.states.length < 2) return "";
+  const vars = trace.variables && trace.variables.length
+    ? trace.variables
+    : [...new Set(trace.states.flatMap((s) => Object.keys(s)))].sort();
+
+  const ruler = `<div class="lane-ruler">
+      <div class="lane-name">step</div>
+      <div class="lane-track">${trace.states.map((_, i) =>
+        `<div class="tick">${i + 1}${i ? " " + esc((trace.actions[i - 1] || {}).name || "") : ""}</div>`
+      ).join("")}</div></div>`;
+
+  const rows = vars.map((v) => {
+    const cells = trace.states.map((s, i) => {
+      const prev = i ? trace.states[i - 1] : null;
+      const changed = prev && JSON.stringify(prev[v]) !== JSON.stringify(s[v]);
+      return `<div class="cell ${changed ? "change" : "hold"}">${esc(show(s[v]))}</div>`;
+    }).join("");
+    return `<div class="lane"><div class="lane-name">${esc(v)}</div>
+      <div class="lane-track">${cells}</div></div>`;
+  }).join("");
+
+  return `<div class="figure">
+    <div class="figure-head"><b>What changes</b>
+      <span class="legend"><span><i style="background:rgba(184,134,42,.5)"></i>changed at this step</span></span>
+    </div>
+    <div class="lanes">${ruler}${rows}</div>
+  </div>`;
+}
+
+function wireInspector(graph) {
+  const svg = document.querySelector("#graph");
+  const panel = document.querySelector("#inspector");
+  if (!svg || !panel || !graph) return;
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const show_ = (id) => {
+    const n = byId.get(id);
+    if (!n) return;
+    panel.innerHTML = Object.entries(n.vars).map(([k, v]) =>
+      `<span><span class="k">${esc(k)}</span> = <span class="v">${esc(v)}</span></span>`
+    ).join("");
+  };
+  svg.addEventListener("pointerover", (e) => {
+    const g = e.target.closest("g.state");
+    if (g) show_(g.dataset.id);
+  });
+  svg.addEventListener("click", (e) => {
+    const g = e.target.closest("g.state");
+    if (g) show_(g.dataset.id);
+  });
+}
+
+function render(body) {
+  const good = body.ok;
+  const s = body.stats || {};
+  const bits = [];
+  if (s.generated != null) bits.push(`${s.generated} states generated`);
+  if (s.distinct != null) bits.push(`${s.distinct} distinct`);
+  if (s.depth != null) bits.push(`depth ${s.depth}`);
+  if (s.duration_ms != null) bits.push(`${s.duration_ms} ms`);
+
+  let html = `<div class="verdict ${good ? "good" : "bad"}">
+      <h2>${esc(HEADLINE[body.outcome] || body.outcome)}</h2>
+      <span class="stats">${esc(bits.join(" · "))}</span></div>`;
+
+  if (body.diagnostics && body.diagnostics.length) {
+    html += "<ul class='diags'>" + body.diagnostics.map((d) => {
+      const where = [d.module, d.line, d.column].filter((x) => x != null).join(":");
+      return `<li>${where ? `<span class="loc">${esc(where)}</span> ` : ""}${esc(d.message)}</li>`;
+    }).join("") + "</ul>";
+  }
+
+  const t = body.trace;
+  if (t && t.states && t.states.length) {
+    const vars = t.variables && t.variables.length
+      ? t.variables
+      : [...new Set(t.states.flatMap((st) => Object.keys(st)))].sort();
+
+    const rows = t.states.map((st, i) => {
+      const prev = i ? t.states[i - 1] : null;
+      const action = i
+        ? esc((t.actions[i - 1] || {}).name || "?")
+        : "initial predicate";
+      const cells = vars.map((v) => {
+        const changed = prev && JSON.stringify(prev[v]) !== JSON.stringify(st[v]);
+        return `<td class="${changed ? "changed" : ""}">${esc(show(st[v]))}</td>`;
+      }).join("");
+      return `<tr style="animation-delay:${i * 55}ms">
+          <td class="step">${i + 1}</td>
+          <td class="action${i ? "" : " initial"}">${action}</td>${cells}</tr>`;
+    }).join("");
+
+    html += `<div class="ladder">
+      <div class="ladder-head">Counterexample — ${t.states.length} step${t.states.length === 1 ? "" : "s"}${t.truncated ? ", truncated" : ""}</div>
+      <table><thead><tr><th>#</th><th>action</th>${
+        vars.map((v) => `<th>${esc(v)}</th>`).join("")}</tr></thead>
+      <tbody>${rows}</tbody></table>
+      ${t.loop_start != null
+        ? `<div class="loopnote">Lasso — the behaviour repeats from step ${t.loop_start + 1}.</div>`
+        : ""}</div>`;
+  }
+  html += renderLanes(t);
+  html += renderGraph(body.graph);
+  out.innerHTML = html;
+  wireInspector(body.graph);
+}
+
+async function check() {
+  if (!spec.value.trim()) { status.textContent = "Nothing to check."; return; }
+  run.disabled = true;
+  status.textContent = "Running TLC…";
+  out.innerHTML = "";
+  const started = Date.now();
+  try {
+    const res = await fetch("/check", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        spec: spec.value,
+        config: config.value.trim() || null,
+        graph: $("#wantGraph").checked,
+      }),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      const detail = typeof body.detail === "string"
+        ? body.detail : JSON.stringify(body.detail);
+      render({ ok: false, outcome: "error",
+               diagnostics: [{ message: detail }], stats: {} });
+    } else {
+      render(body);
+    }
+    status.textContent = `${((Date.now() - started) / 1000).toFixed(1)}s`;
+  } catch (err) {
+    status.textContent = "";
+    render({ ok: false, outcome: "error",
+             diagnostics: [{ message: "Could not reach the checker: " + err.message }],
+             stats: {} });
+  } finally {
+    run.disabled = false;
+  }
+}
+
+run.addEventListener("click", check);
+addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); check(); }
+});
+</script>
+</body>
+</html>

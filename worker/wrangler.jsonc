@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tla-runner",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-01",
+  "routes": [
+    { "pattern": "tla-runner.ericspencer.us", "custom_domain": true }
+  ],
+  // Per-IP, per-Cloudflare-location. TLC is expensive: a handful of checks a
+  // minute from one address is generous, and the origin only runs two at once.
+  "ratelimits": [
+    {
+      "name": "CHECK_LIMITER",
+      "namespace_id": "4471",
+      "simple": { "limit": 10, "period": 60 }
+    }
+  ],
+  "vars": {
+    // The tunnel hostname the Worker proxies to. Not secret, but not advertised
+    // either -- the shared key is what actually guards it.
+    "ORIGIN": "https://tla-runner-origin.ericspencer.us"
+  }
+  // Secret, set out of band:
+  //   wrangler secret put ORIGIN_KEY
+}

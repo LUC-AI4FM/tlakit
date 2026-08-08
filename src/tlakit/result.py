@@ -288,6 +288,9 @@ class CheckResult:
     #: One standalone SVG per trace step, when the run was asked to animate.
     #: Produced by the spec's own AnimView through SVG.tla, not by tlakit.
     frames: list[str] = field(default_factory=list)
+    #: The reachable state graph, when the run asked for it. TLC does not
+    #: produce one otherwise.
+    graph: Any = None
 
     @property
     def ok(self) -> bool:

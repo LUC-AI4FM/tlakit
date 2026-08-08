@@ -152,6 +152,8 @@ class Spec:
         timeout: float | None = None,
         coverage: bool = False,
         animate: bool = False,
+        graph: bool = False,
+        max_graph_nodes: int | None = None,
         heap: str | None = None,
         extra_opts: list[str] | None = None,
     ) -> CheckResult:
@@ -182,6 +184,8 @@ class Spec:
                 timeout=timeout,
                 extra_opts=options,
                 heap=heap,
+                graph=graph,
+                max_graph_nodes=max_graph_nodes,
             )
 
         if not defines_animview(self.source):

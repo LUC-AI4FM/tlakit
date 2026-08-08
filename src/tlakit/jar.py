@@ -21,6 +21,10 @@ class JarNotFound(FileNotFoundError):
     """Raised when tla2tools.jar cannot be located."""
 
 
+class NotIsolated(RuntimeError):
+    """Raised when tla2tools.jar shares a directory with other jars."""
+
+
 def cache_dir() -> Path:
     return Path(platformdirs.user_cache_dir("tlakit"))
 
@@ -56,9 +60,38 @@ def find_tools_jar(explicit: Path | None = None) -> Path:
     )
 
 
-def find_community_jar(explicit: Path | None = None) -> Path | None:
-    """CommunityModules is optional; SVG.tla and Json.tla need it."""
-    for path in _candidates(explicit, ENV_COMMUNITY, COMMUNITY_JAR):
+def find_community_jar(explicit: Path | None | bool = None) -> Path | None:
+    """CommunityModules is optional; SVG.tla and Json.tla need it.
+
+    Pass `False` to refuse it outright. That matters for untrusted specs:
+    CommunityModules ships `IOUtils!IOExec`, which runs arbitrary shell
+    commands from inside a specification.
+    """
+    if explicit is False:
+        return None
+    for path in _candidates(explicit or None, ENV_COMMUNITY, COMMUNITY_JAR):
         if path.is_file():
             return path
     return None
+
+
+def assert_isolated(tools_jar: Path) -> None:
+    """Fail if any other jar sits beside `tools_jar`.
+
+    TLC adds jars in tla2tools.jar's own directory to its module search path,
+    so a CommunityModules jar that is merely *adjacent* is loadable even when
+    it is not on the classpath -- verified 2026-08-07. Keeping the jar alone in
+    its directory is the only reliable way to deny a spec those operators.
+    """
+    directory = Path(tools_jar).parent
+    neighbours = sorted(
+        p.name for p in directory.glob("*.jar") if p.name != Path(tools_jar).name
+    )
+    if neighbours:
+        raise NotIsolated(
+            f"{directory} also contains {', '.join(neighbours)}. TLC loads jars "
+            "adjacent to tla2tools.jar, so a specification could reach "
+            "IOUtils!IOExec and run shell commands. Put tla2tools.jar in a "
+            "directory of its own before serving untrusted specs."
+        )
+

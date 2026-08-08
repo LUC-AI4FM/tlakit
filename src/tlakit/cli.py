@@ -24,6 +24,7 @@ from .source import declared_variables
 from .trace import load_trace
 
 TRACE_FILE = "trace.json"
+GRAPH_FILE = "graph.dot"
 
 
 class JavaNotFound(FileNotFoundError):
@@ -116,8 +117,13 @@ class CliRunner:
     def __init__(
         self,
         tools_jar: Path | None = None,
-        community_jar: Path | None = None,
+        community_jar: Path | None | bool = None,
     ) -> None:
+        """`community_jar=False` refuses CommunityModules entirely.
+
+        Use that for untrusted input: it ships `IOUtils!IOExec`, which runs
+        shell commands from inside a specification.
+        """
         self.tools_jar = find_tools_jar(tools_jar)
         self.community_jar = find_community_jar(community_jar)
 
@@ -198,6 +204,8 @@ class CliRunner:
         collect: str | None = None,
         declared: list[str] | None = None,
         heap: str | None = None,
+        graph: bool = False,
+        max_graph_nodes: int | None = None,
     ) -> CheckResult:
         """Model-check a module with TLC.
 
@@ -233,12 +241,22 @@ class CliRunner:
                 "-dumpTrace",
                 "json",
                 TRACE_FILE,
+                # actionlabels puts the action on each edge, which is the whole
+                # point of showing the graph rather than a bag of states.
+                *(["-dump", "dot,actionlabels", GRAPH_FILE] if graph else []),
                 *(extra_opts or []),
                 f"{module}.tla",
             ]
             raw, timed_out = self._run(argv, work, timeout)
             names = declared if declared is not None else declared_variables(source)
             trace = load_trace(work / TRACE_FILE, names)
+            state_graph = None
+            if graph:
+                dot = work / GRAPH_FILE
+                if dot.is_file():
+                    from .graph import parse_dot
+
+                    state_graph = parse_dot(dot.read_text(), max_graph_nodes)
             if collect:
                 # Sort by the trailing step number, not lexically: frame 10
                 # must not sort between 1 and 2.
@@ -264,10 +282,11 @@ class CliRunner:
             ] + diagnostics
             return CheckResult(
                 Outcome.TIMEOUT, diagnostics, trace, stats, raw,
-                source=source, frames=frames,
+                source=source, frames=frames, graph=state_graph,
             )
 
         outcome, diagnostics, stats = parse_tlc(raw.stdout, raw.exit_code)
         return CheckResult(
-            outcome, diagnostics, trace, stats, raw, source=source, frames=frames
+            outcome, diagnostics, trace, stats, raw, source=source,
+            frames=frames, graph=state_graph,
         )

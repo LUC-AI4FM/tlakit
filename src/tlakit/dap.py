@@ -487,9 +487,37 @@ class DebugSession:
             if self._client.wait_for_event("stopped", timeout=0.05) is not None:
                 return True
             if self._process.poll() is not None:
-                # Drain whatever arrived in the same breath as the exit.
-                return self._client.wait_for_event("stopped", timeout=0.2) is not None
+                # A dead TLC is not suspended at a breakpoint, so a `stopped`
+                # still sitting in the queue is stale -- honouring it returns a
+                # stop that nothing can then be asked about.
+                return False
         return False
+
+    def _request(self, command: str, timeout: float = 15.0, **arguments: Any) -> dict[str, Any]:
+        """A request that gives up as soon as TLC dies.
+
+        `DapClient.request` can only wait for its timeout; it has no view of
+        the process. TLC can exit between announcing a stop and answering for
+        it, and then a `stackTrace` waits the full 30 seconds and fails -- which
+        is what broke this on CI while passing locally, because it is a race
+        and the timing differs per machine.
+        """
+        assert self._client is not None
+        seq = self._client.send(command, **arguments)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self._client._lock:
+                response = self._client._responses.pop(seq, None)
+            if response is not None:
+                if not response.get("success", False):
+                    raise DebuggerError(
+                        f"{command} failed: {response.get('message') or 'no reason given'}"
+                    )
+                return response.get("body") or {}
+            if self._process.poll() is not None:
+                raise DebuggerTimeout(f"TLC exited while awaiting {command!r}")
+            time.sleep(0.01)
+        raise DebuggerTimeout(f"no response to {command!r} within {timeout}s")
 
     def step(self, timeout: float = 30.0) -> Step | None:
         """Advance to the next transition and read the behaviour so far.
@@ -504,7 +532,12 @@ class DebugSession:
         if not self._await_stop(timeout):
             self._exhausted = True
             return None
-        return self._read_trace()
+        try:
+            return self._read_trace()
+        except DebuggerTimeout:
+            # TLC announced the stop and then finished before answering for it.
+            self._exhausted = True
+            return None
 
     def step_back(self, timeout: float = 30.0) -> Step | None:
         """Ask the debugger to step backwards.
@@ -516,9 +549,13 @@ class DebugSession:
             return None
         assert self._client is not None
         self._client.request("stepBack", threadId=0)
-        if self._client.wait_for_event("stopped", timeout=timeout) is None:
+        if not self._await_stop(timeout):
             return None
-        return self._read_trace()
+        try:
+            return self._read_trace()
+        except DebuggerTimeout:
+            self._exhausted = True
+            return None
 
     def evaluate(self, expression: str, timeout: float = 30.0) -> str | None:
         """Evaluate an expression in the stopped frame, as a watch would."""
@@ -528,7 +565,7 @@ class DebugSession:
         frame = self._top_frame()
         if frame is None:
             return None
-        body = self._client.request(
+        body = self._request(
             "evaluate",
             timeout=timeout,
             expression=expression,
@@ -541,7 +578,7 @@ class DebugSession:
 
     def _top_frame(self) -> dict[str, Any] | None:
         assert self._client is not None
-        frames = self._client.request("stackTrace", threadId=0).get("stackFrames", [])
+        frames = self._request("stackTrace", threadId=0).get("stackFrames", [])
         return frames[0] if frames else None
 
     def _scope_variables(self, name: str) -> list[dict[str, Any]]:
@@ -549,9 +586,9 @@ class DebugSession:
         frame = self._top_frame()
         if frame is None:
             return []
-        for scope in self._client.request("scopes", frameId=frame["id"]).get("scopes", []):
+        for scope in self._request("scopes", frameId=frame["id"]).get("scopes", []):
             if scope.get("name") == name:
-                return self._client.request(
+                return self._request(
                     "variables", variablesReference=scope["variablesReference"]
                 ).get("variables", [])
         return []

@@ -2,7 +2,15 @@
 from __future__ import annotations
 
 from . import api, install, jar, sweep
-from .api import Spec, build_config, check_source, default_runner, load
+from .api import (
+    Spec,
+    build_config,
+    check_source,
+    default_runner,
+    load,
+    use_local,
+    use_remote,
+)
 from .cli import CliRunner, JavaNotFound, java_executable
 from .jar import JarNotFound
 from .result import (
@@ -41,7 +49,10 @@ __all__ = [
     "jar",
     "java_executable",
     "load",
+    "remote",
     "sweep",
+    "use_local",
+    "use_remote",
 ]
 
 

@@ -64,6 +64,14 @@ until it does.
 in `pyproject.toml` means deleting the old wheel and editing `piplite_urls` to
 match. Leave the stale one in place and the build keeps shipping it, silently.
 
+`overrides.json` carries JupyterLab settings the site needs changed from their
+defaults. The build copies it into the site and patches it into
+`jupyter-lite.json` as `settingsOverrides`, so it is the only place a static
+build can set something like `autoStartDefaultKernel` — which, with the
+`kernelspec` each notebook pins, is what decides whether a visitor is shown a
+kernel picker before anything has registered (#70). Both halves are guarded by
+`tests/test_lite_notebooks.py`.
+
 ## Deploy
 
 ```bash
@@ -76,3 +84,16 @@ The Pyodide kernel does not appear in the launcher when driven through an
 automated browser — see issue #53. This reproduces on JupyterLite's own demo
 deployment in the same browser, so it is not this build. Verify in an ordinary
 browser window.
+
+Re-measured 2026-08-08 while working on #70, and it is wider than the paragraph
+above suggests. On `jupyterlite.github.io/demo`, whose config lists
+`@jupyterlite/pyodide-kernel-extension` and sets `defaultKernelName: python`,
+the launcher offered `JavaScript (Web Worker)` and `p5.js` and no Python at
+all, stable across 25 seconds of polling — in a headless browser *and* in an
+ordinary desktop Chrome driven through an extension. No console error
+accompanies it. Nothing registers, so `refreshSpecs()` does not help either.
+
+The practical cost: **anything about kernel selection has to be checked by
+hand.** A build with the picker fixed and a build without it look identical to
+any browser we can drive, because in both there is no Python kernel to select.
+Do not read a passing automated check as evidence here.

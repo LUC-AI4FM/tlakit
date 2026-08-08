@@ -76,6 +76,7 @@ class CheckRequest(BaseModel):
     specification: str = "Spec"
     timeout: Optional[float] = None
     coverage: bool = False
+    graph: bool = False
 
 
 def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = None):
@@ -211,6 +212,8 @@ def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = No
                 timeout=clamp_timeout(payload.timeout, limits),
                 extra_opts=["-coverage", "1"] if payload.coverage else [],
                 heap=limits.heap,
+                graph=payload.graph,
+                max_graph_nodes=limits.graph_nodes,
             )
         if result.outcome is Outcome.ERROR:
             # Responses omit raw on purpose, so without this an unexpected

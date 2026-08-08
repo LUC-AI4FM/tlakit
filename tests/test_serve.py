@@ -411,3 +411,42 @@ def test_health_advertises_the_rate_limits(client):
     lim = client.get("/health", headers={"CF-Connecting-IP": "192.0.2.5"}).json()["limits"]
     assert lim["checks_per_minute"] >= 1
     assert lim["checks_per_hour"] >= lim["checks_per_minute"]
+
+
+# --- state graph over the wire --------------------------------------------
+
+
+@pytest.mark.java
+def test_no_graph_in_the_response_unless_requested(client):
+    body = client.post("/check", json={"spec": SPEC, "invariants": ["Inv"],
+                       "timeout": 25}, headers={"CF-Connecting-IP": "192.0.2.30"}).json()
+    assert body["graph"] is None
+
+
+@pytest.mark.java
+def test_the_graph_comes_back_with_the_counterexample_located_in_it(client):
+    body = client.post(
+        "/check",
+        json={"spec": SPEC, "invariants": ["Inv"], "graph": True, "timeout": 25},
+        headers={"CF-Connecting-IP": "192.0.2.31"},
+    ).json()
+    g = body["graph"]
+    assert g and g["nodes"] and g["edges"]
+    assert g["variables"] == ["x"]
+    assert any(n["initial"] for n in g["nodes"])
+    # The highlight is the whole point: the trace must be findable in the graph.
+    assert len(g["path"]) == len(body["trace"]["states"])
+    ids = {n["id"] for n in g["nodes"]}
+    assert all(node_id in ids for node_id in g["path"])
+
+
+@pytest.mark.java
+def test_graph_edges_never_dangle(client):
+    body = client.post(
+        "/check",
+        json={"spec": SPEC, "invariants": ["Inv"], "graph": True, "timeout": 25},
+        headers={"CF-Connecting-IP": "192.0.2.32"},
+    ).json()
+    g = body["graph"]
+    ids = {n["id"] for n in g["nodes"]}
+    assert all(e["from"] in ids and e["to"] in ids for e in g["edges"])

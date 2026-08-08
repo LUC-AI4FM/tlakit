@@ -42,6 +42,9 @@ HEAP = "512M"
 MAX_CONCURRENCY = 2
 #: Longest counterexample returned. A trace can otherwise be enormous.
 MAX_TRACE_STATES = 200
+#: A state graph is quadratic-ish in interest and linear in bytes; past a few
+#: hundred nodes it is neither renderable nor readable.
+MAX_GRAPH_NODES = 400
 
 
 @dataclass(frozen=True)
@@ -53,6 +56,7 @@ class Limits:
     heap: str = HEAP
     concurrency: int = MAX_CONCURRENCY
     trace_states: int = MAX_TRACE_STATES
+    graph_nodes: int = MAX_GRAPH_NODES
 
 
 def isolated_jar_dir(destination: Path | None = None) -> Path:
@@ -128,6 +132,16 @@ def as_json(result: CheckResult, limits: Limits) -> dict[str, Any]:
             "loop_start": result.trace.loop_start,
             "variables": result.trace.variables,
         }
+    graph = None
+    if result.graph is not None:
+        from ..graph import path_through
+
+        graph = result.graph.to_json()
+        graph["path"] = (
+            path_through(result.graph, result.trace.states)
+            if result.trace is not None
+            else []
+        )
     return {
         "outcome": result.outcome.value,
         "ok": result.ok,
@@ -142,6 +156,7 @@ def as_json(result: CheckResult, limits: Limits) -> dict[str, Any]:
             for d in result.diagnostics
         ],
         "trace": trace,
+        "graph": graph,
         "stats": {
             "generated": result.stats.generated,
             "distinct": result.stats.distinct,

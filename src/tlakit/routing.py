@@ -1,8 +1,10 @@
 """Decide what a notebook cell means.
 
-Kept separate from the kernel so it can be tested without a running Jupyter:
-routing is the only judgement the kernel makes, and it is the part worth
-covering.
+Kept out of the kernel package, not merely out of the kernel class. Two clients
+need this decision -- the kernel, and the input transformer that gives a browser
+kernel the same behaviour -- and importing it through `tlakit.kernel` would drag
+in ipykernel, which does not exist under Pyodide. Nothing here imports Jupyter,
+which is also what makes routing testable without a running one.
 """
 from __future__ import annotations
 

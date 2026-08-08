@@ -456,3 +456,30 @@ def test_graph_edges_never_dangle(client):
     g = body["graph"]
     ids = {n["id"] for n in g["nodes"]}
     assert all(e["from"] in ids and e["to"] in ids for e in g["edges"])
+
+
+def test_preflight_is_allowed_so_a_browser_kernel_can_call_check(client):
+    """tlakit's Pyodide kernel POSTs JSON, which browsers preflight."""
+    response = client.options(
+        "/check",
+        headers={
+            "origin": "https://tlakit.pages.dev",
+            "access-control-request-method": "POST",
+            "access-control-request-headers": "content-type",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "*"
+    assert "POST" in response.headers["access-control-allow-methods"]
+
+
+def test_cors_never_allows_credentials(client):
+    """A wildcard origin plus credentials is illegal and would break the page."""
+    response = client.options(
+        "/check",
+        headers={
+            "origin": "https://tlakit.pages.dev",
+            "access-control-request-method": "POST",
+        },
+    )
+    assert "access-control-allow-credentials" not in response.headers

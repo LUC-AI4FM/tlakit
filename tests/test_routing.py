@@ -1,7 +1,7 @@
 """Issue #25: the kernel's only judgement is what a cell means."""
 import pytest
 
-from tlakit.kernel.routing import Cell, ambiguous_config_message, classify, module_name
+from tlakit.routing import Cell, ambiguous_config_message, classify, module_name
 
 MODULE = "---- MODULE Widget ----\nVARIABLE x\nInit == x = 0\n===="
 CONFIG = "SPECIFICATION Spec\nINVARIANT Inv"

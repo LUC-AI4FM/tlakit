@@ -90,11 +90,14 @@ def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = No
     check_limiter = RateLimiter(rules=CHECK_RULES)
     cheap_limiter = RateLimiter(rules=CHEAP_RULES)
 
-    def enforce(limiter: RateLimiter, request: Request) -> None:
-        key = client_key(
+    def key_of(request: Request) -> str:
+        return client_key(
             request.headers.get("cf-connecting-ip"),
             request.client.host if request.client else None,
         )
+
+    def enforce(limiter: RateLimiter, request: Request) -> None:
+        key = key_of(request)
         wait = limiter.check(key)
         if wait is not None:
             raise HTTPException(
@@ -221,6 +224,9 @@ def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = No
             )
 
         if gate.locked():
+            # Refund the slot: this caller is being turned away without a check
+            # having run, and they already paid for one above.
+            check_limiter.refund(key_of(request))
             raise HTTPException(status_code=503, detail="busy; retry shortly")
 
         async with gate:

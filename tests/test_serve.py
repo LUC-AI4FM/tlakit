@@ -491,3 +491,58 @@ def test_cors_never_allows_credentials(client):
         },
     )
     assert "access-control-allow-credentials" not in response.headers
+
+
+# --------------------------------------------------------------------------
+# Rate limits sized for a person, not for a script.
+# --------------------------------------------------------------------------
+
+
+def test_the_check_budget_covers_the_browser_tutorial():
+    """The published tutorial runs four checks, and re-running a cell after an
+    edit is the entire point of a notebook. The old 6/minute was tripped from
+    inside the page itself.
+    """
+    from tlakit.serve.limiter import CHECK_RULES, RateLimiter
+
+    per_minute = next(rule for rule in CHECK_RULES if rule.window == 60)
+    assert per_minute.limit >= 20, "a visitor following the tutorial trips this"
+
+    limiter = RateLimiter(rules=CHECK_RULES)
+    # Twenty checks in one burst: a tutorial run plus edits and re-runs.
+    assert all(limiter.check("visitor", now=100.0) is None for _ in range(20))
+
+
+def test_an_hourly_ceiling_still_stops_sustained_hammering():
+    """Raising the burst allowance must not remove the sustained one."""
+    from tlakit.serve.limiter import CHECK_RULES, RateLimiter
+
+    hourly = next(rule for rule in CHECK_RULES if rule.window == 3600)
+    limiter = RateLimiter(rules=CHECK_RULES)
+    # Spread out enough that only the hourly rule can bite.
+    for i in range(hourly.limit):
+        assert limiter.check("bot", now=float(i) * 10.0) is None
+    assert limiter.check("bot", now=float(hourly.limit) * 10.0) is not None
+
+
+def test_a_busy_rejection_refunds_the_slot():
+    """`/check` rate-limits before it consults the concurrency gate, so a
+    caller turned away with 503 had already paid for a check that never ran.
+    """
+    from tlakit.serve.limiter import RateLimiter, Rule
+
+    limiter = RateLimiter(rules=(Rule(limit=2, window=60),))
+    assert limiter.check("someone", now=0.0) is None
+    assert limiter.check("someone", now=1.0) is None
+    assert limiter.check("someone", now=2.0) is not None  # spent
+
+    limiter.refund("someone")
+    assert limiter.check("someone", now=3.0) is None, "refund did not free a slot"
+
+
+def test_refunding_an_unknown_client_is_harmless():
+    from tlakit.serve.limiter import RateLimiter, Rule
+
+    limiter = RateLimiter(rules=(Rule(limit=1, window=60),))
+    limiter.refund("never-seen")  # must not raise
+    assert limiter.check("never-seen", now=0.0) is None

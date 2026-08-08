@@ -71,6 +71,16 @@ export default {
       );
     }
 
+    // A TLA+ module is full of exactly what JSON escaping is worst at, so
+    // /check also takes `-F spec=@Counter.tla` (#64). That body is not JSON
+    // and must not be parsed as such -- but it is still measured, and the
+    // origin still applies its own cap.
+    const contentType = request.headers.get("content-type") ?? "";
+    const isMultipart = contentType
+      .split(";")[0]
+      .trim()
+      .toLowerCase() === "multipart/form-data";
+
     let body = null;
     if (request.method === "POST") {
       // Content-Length can lie or be absent; measure what actually arrived.
@@ -81,10 +91,12 @@ export default {
           413,
         );
       }
-      try {
-        JSON.parse(raw); // fail here rather than at the origin
-      } catch {
-        return json({ error: "body must be JSON" }, 400);
+      if (!isMultipart) {
+        try {
+          JSON.parse(raw); // fail here rather than at the origin
+        } catch {
+          return json({ error: "body must be JSON" }, 400);
+        }
       }
       body = raw;
     }
@@ -96,7 +108,9 @@ export default {
       const response = await fetch(upstream, {
         method: request.method,
         headers: {
-          "content-type": "application/json",
+          // Forwarded whole, not rebuilt: a multipart content-type carries the
+          // boundary, and dropping it makes the body unparseable at the origin.
+          "content-type": isMultipart ? contentType : "application/json",
           // Proves the request came through this Worker. Without it the origin
           // refuses, so discovering the tunnel hostname is not enough.
           "x-tlakit-key": env.ORIGIN_KEY,

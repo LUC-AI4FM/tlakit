@@ -201,6 +201,81 @@ def test_only_health_and_check_are_routed(client):
     assert client.get("/files").status_code == 404
 
 
+# --- raw .tla upload (#64) ------------------------------------------------
+
+
+@pytest.mark.java
+def test_a_spec_can_be_uploaded_instead_of_json_escaped(client):
+    """`curl -F spec=@Counter.tla`. A TLA+ module is full of newlines,
+    backslashes and quotes, which is the worst case for hand-escaping JSON."""
+    response = client.post(
+        "/check",
+        files={
+            "spec": ("Counter.tla", SPEC),
+            "cfg": ("Counter.cfg", "SPECIFICATION Spec\nINVARIANT Inv\n"),
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["outcome"] == "invariant_violation"
+    assert [s["x"] for s in body["trace"]["states"]] == [0, 1, 2, 3]
+
+
+#: SPEC counts up forever, so with no invariant to trip it just runs until the
+#: timeout. The upload tests care about the body being read, not about the
+#: search, so they use a spec that finishes.
+BOUNDED = SPEC.replace(
+    "Next == x' = x + 1", "Next == IF x < 2 THEN x' = x + 1 ELSE x' = x"
+)
+
+
+@pytest.mark.java
+def test_an_upload_without_a_cfg_still_checks(client):
+    body = client.post("/check", files={"spec": ("Counter.tla", BOUNDED)}).json()
+    assert body["ok"] is True
+
+
+@pytest.mark.java
+def test_the_module_name_never_comes_from_the_filename(client):
+    """The filename is attacker-controlled; the module header is not."""
+    body = client.post("/check", files={"spec": ("../../etc/passwd", BOUNDED)}).json()
+    assert body["ok"] is True
+    assert "passwd" not in repr(body)
+
+
+@pytest.mark.java
+def test_an_upload_over_the_cap_is_refused_before_it_is_read(client):
+    """The cap has to bite on the declared length, not on a buffer.
+
+    Starlette's own `max_part_size` does not cover this: it counts bytes held
+    in memory and a *file* part is spooled to disk, so an upload sails past it.
+    Measured before this was written -- a 69 KB part reached `validate()`.
+    """
+    response = client.post(
+        "/check", files={"spec": ("Big.tla", "x" * (LIMITS.spec_bytes + 5000))}
+    )
+    assert response.status_code == 413
+    assert str(LIMITS.spec_bytes) in response.json()["detail"]
+
+
+@pytest.mark.java
+def test_a_multipart_body_without_a_spec_part_says_so(client):
+    response = client.post("/check", files={"cfg": ("x.cfg", "INVARIANT Inv")})
+    assert response.status_code == 422
+    assert "spec" in str(response.json()["detail"])
+
+
+@pytest.mark.java
+def test_the_json_form_is_untouched_by_the_upload_path(client):
+    """Dispatching on content-type must not change the original contract:
+    unknown fields are still refused rather than ignored."""
+    assert client.post("/check", json={"spec": SPEC, "extra_opts": ["-dump"]}).status_code == 422
+    assert client.post(
+        "/check", content=b"{not json", headers={"content-type": "application/json"}
+    ).status_code == 422
+
+
+
 # --- parsing (#67) --------------------------------------------------------
 
 

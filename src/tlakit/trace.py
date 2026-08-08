@@ -113,9 +113,32 @@ def load_trace(path: Path, declared: list[str] | None = None) -> Trace | None:
 # recursive-descent reader for TLC's own value syntax (records, tuples,
 # sets, strings, model values) -- still just naming TLC's output, not
 # reinterpreting TLA+.
-
+#
+# A counterexample ends one of two ways, neither of which introduces a new
+# state with its own variable values:
+#
+#     Back to state 1: <Next line 5, col 9 to line 5, col 24 of module L>
+#
+# names an *already-printed* state the behaviour cycles back to (the lasso
+# case; tlakit.parse.parse_loop_start reads this line for `loop_start`), or
+#
+#     State 4: Stuttering
+#
+# which means the behaviour stutters forever at the last state actually
+# printed -- verified 2026-08-07 against `-dumpTrace json` for the same run,
+# which represents this identically: as many states as were genuinely
+# distinct, with no extra one for "and then it stutters". Missing this
+# second form (no `<...>` header, so it fell outside the state-header
+# alternative entirely) used to leave TLC's own stutter marker unrecognized;
+# it is now a boundary like the other two, and sets `loop_start` itself
+# since `parse_loop_start` -- which only reads "Back to state" -- has no
+# other way to learn a text-mode trace stutters.
 _STATE_BOUNDARY = re.compile(
-    r"^(?:State (?P<num>\d+): <(?P<header>.*?)>|Back to state \d+:.*)[ \t]*$",
+    r"^(?:"
+    r"State (?P<num>\d+): <(?P<header>.*?)>"
+    r"|State \d+: (?P<stuttering>Stuttering)"
+    r"|Back to state \d+:.*"
+    r")[ \t]*$",
     re.M,
 )
 
@@ -299,8 +322,16 @@ def parse_text_trace(stdout: str, declared: list[str] | None = None) -> Trace | 
     states: list[dict[str, Any]] = []
     state_ids: list[Any] = []
     headers: list[str] = []
+    stuttered = False
     for i, b in enumerate(boundaries):
+        if b.group("stuttering") is not None:
+            # No new state follows -- the last one printed repeats forever.
+            stuttered = True
+            continue
         if b.group("num") is None:
+            # "Back to state N: <...>": also names an already-printed state,
+            # not a new one. `loop_start` for this case comes from
+            # `tlakit.parse.parse_loop_start`, applied by the caller.
             continue
         end = boundaries[i + 1].start() if i + 1 < len(boundaries) else len(stdout)
         body = stdout[b.end():end]
@@ -323,5 +354,6 @@ def parse_text_trace(stdout: str, declared: list[str] | None = None) -> Trace | 
         states=states,
         actions=actions,
         state_ids=state_ids,
+        loop_start=len(states) - 1 if stuttered else None,
         declared=list(declared or []),
     )

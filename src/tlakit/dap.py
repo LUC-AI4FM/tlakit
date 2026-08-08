@@ -687,6 +687,13 @@ def walk(
             step = session.step()
             if step is None:
                 break
+            if not step.states:
+                # A stop that is not a state: TLC suspends before the first
+                # ASSUME, and a breakpoint can also land somewhere no behaviour
+                # exists yet. `walk` reports behaviours, and a behaviour with no
+                # states is not one -- it read as "the spec has an empty state
+                # space", which is what a wrongly-placed breakpoint looks like.
+                continue
             if distinct and collected and collected[-1].states == step.states:
                 continue
             collected.append(step)

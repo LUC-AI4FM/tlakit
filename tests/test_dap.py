@@ -339,3 +339,17 @@ def test_the_stepper_feeds_the_same_widget_as_a_finished_run(ready):
     assert view.variables == ["x"]
     assert view.steps[2]["state"] == {"x": 2}
     assert view.steps[2]["action"] == "Next"
+
+
+@pytest.mark.java
+def test_a_stop_that_is_not_a_state_is_not_a_behaviour(ready):
+    """TLC suspends before the first ASSUME, and a breakpoint can land where
+    no behaviour exists yet. Either produces a `Step` with no states, which
+    `walk` must not report: a run of empty steps reads as "the spec has an
+    empty state space", which is exactly what a wrongly-placed breakpoint
+    looks like. This is how `test_only_breaking_on_next_itself_finds_nothing`
+    failed on a CI runner while passing locally -- the empty stop was drained
+    at connect time here and not there.
+    """
+    steps = walk(MICROWAVE, "Microwave", SPEC_CONFIG, limit=8, distinct=False)
+    assert all(step.states for step in steps)

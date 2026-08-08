@@ -478,3 +478,39 @@ def trace_view(result: CheckResult) -> "TraceView | None":
     if result.trace is None or not result.trace.states:
         return None
     return TraceView(result.trace)
+
+
+def stepper_view(
+    source: str,
+    module: str,
+    config: str,
+    *,
+    limit: int = 100,
+    **kwargs: Any,
+) -> "TraceView | None":
+    """Step a spec under the TLA+ Debugger and scrub the result (issue #24).
+
+    The debugger half of `trace_view`. `trace_view` shows the counterexample a
+    finished run produced; this drives `tlakit.dap` to walk the state space as
+    TLC explores it, and hands the deepest behaviour it reached to the same
+    widget.
+
+    They share a widget because `dap.Step.as_trace()` returns an ordinary
+    `Trace` -- the debugger reports states as TLA+ records and names frames the
+    way `-dumpTrace json` names actions, so both paths land on the same object
+    and nothing downstream has to know which one it came from.
+
+    Returns None when the spec produced no states at all. Needs Java: it runs
+    a real TLC.
+    """
+    from .dap import walk
+    from .source import declared_variables
+
+    steps = walk(source, module, config, limit=limit, **kwargs)
+    if not steps:
+        return None
+    deepest = max(steps, key=lambda step: len(step.states))
+    trace = deepest.as_trace(declared=declared_variables(source))
+    if not trace.states:
+        return None
+    return TraceView(trace)

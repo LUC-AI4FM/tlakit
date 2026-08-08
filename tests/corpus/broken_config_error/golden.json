@@ -1,0 +1,11 @@
+{
+  "diagnostics": [],
+  "outcome": "config_error",
+  "stats": {
+    "depth": null,
+    "distinct": null,
+    "generated": null,
+    "queue_left": null
+  },
+  "trace": null
+}

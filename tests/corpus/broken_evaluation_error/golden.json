@@ -1,0 +1,11 @@
+{
+  "diagnostics": [],
+  "outcome": "evaluation_error",
+  "stats": {
+    "depth": 1,
+    "distinct": 1,
+    "generated": 1,
+    "queue_left": 0
+  },
+  "trace": null
+}

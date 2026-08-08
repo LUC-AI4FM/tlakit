@@ -1,0 +1,22 @@
+{
+  "diagnostics": [],
+  "outcome": "temporal_violation",
+  "stats": {
+    "depth": 2,
+    "distinct": 2,
+    "generated": 3,
+    "queue_left": 0
+  },
+  "trace": {
+    "actions": [],
+    "loop_start": null,
+    "states": [
+      {
+        "x": 0
+      }
+    ],
+    "variables": [
+      "x"
+    ]
+  }
+}

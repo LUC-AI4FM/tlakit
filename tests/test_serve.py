@@ -357,7 +357,15 @@ def test_the_page_is_still_gated_when_a_key_is_configured(monkeypatch):
     """A landing page must not become an unauthenticated hole in a keyed
     deployment -- but it also should not be pointless there, so it is exempt
     only if the whole service is open."""
+    from tlakit.jar import JarNotFound
     from tlakit.serve.app import KEY_ENV, create_app
+
+    if shutil.which("java") is None:
+        pytest.skip("java not on PATH")
+    try:
+        isolated_jar_dir()
+    except JarNotFound as exc:
+        pytest.skip(str(exc))
 
     monkeypatch.setenv(KEY_ENV, "s3cret")
     guarded = TestClient(create_app())

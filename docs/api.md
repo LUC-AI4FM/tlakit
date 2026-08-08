@@ -18,6 +18,17 @@ notebook magics — which have no docstring to be generated from — see
         - use_local
         - module_name_of
         - tla_value
+        - Raw
+
+## Command line
+
+The `tlakit` console script. Its exit codes are a contract — see the module
+docstring for why `1` and `2` are separate.
+
+::: tlakit.cli_main
+    options:
+      members:
+        - main
 
 ## Results
 

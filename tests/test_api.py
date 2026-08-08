@@ -82,10 +82,13 @@ def test_check_deadlock_alongside_a_raw_config_is_refused():
         spec.check(config="SPECIFICATION Spec\n", check_deadlock=False)
 
 
-def test_a_remote_spec_reports_that_it_cannot_parse():
+def test_both_runners_can_parse_now():
+    """#67 exposed SANY on the service, so the remote runner stopped being the
+    one that could only check. `can_parse` stays on the runner rather than
+    being assumed, because a future runner may again lack it."""
     from tlakit import api
     from tlakit.api import Spec
     from tlakit.remote import RemoteRunner
 
-    assert Spec(source="", name="M", runner=RemoteRunner()).can_parse is False
+    assert Spec(source="", name="M", runner=RemoteRunner()).can_parse is True
     assert api.CliRunner.can_parse is True

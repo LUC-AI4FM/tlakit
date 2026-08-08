@@ -110,7 +110,10 @@ def test_no_error_class_leaks_a_path(name):
     assert not leaked, f"{name} leaked {leaked}"
 
 
-@pytest.mark.java
+@pytest.mark.skipif(
+    __import__("sys").platform == "win32",
+    reason="POSIX mode bits; Windows ACLs are a different mechanism",
+)
 def test_the_working_directory_is_private():
     """A submitted spec sits on disk during the check. Other local accounts
     must not be able to read it."""

@@ -143,6 +143,10 @@ class CliRunner:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            # Windows would otherwise decode with cp1252 and choke on the
+            # Unicode operators TLA+ genuinely allows.
+            encoding="utf-8",
+            errors="replace",
             **GROUP_KWARGS,
         )
         with _LIVE_LOCK:
@@ -166,7 +170,7 @@ class CliRunner:
         """Syntax- and level-check a module with SANY."""
         with tempfile.TemporaryDirectory(prefix="tlakit-") as tmp:
             work = Path(tmp)
-            (work / f"{module}.tla").write_text(source)
+            (work / f"{module}.tla").write_text(source, encoding="utf-8")
             argv = [
                 _java(),
                 "-cp",
@@ -225,10 +229,10 @@ class CliRunner:
         frames: list[str] = []
         with tempfile.TemporaryDirectory(prefix="tlakit-") as tmp:
             work = Path(tmp)
-            (work / f"{module}.tla").write_text(source)
-            (work / f"{module}.cfg").write_text(config)
+            (work / f"{module}.tla").write_text(source, encoding="utf-8")
+            (work / f"{module}.cfg").write_text(config, encoding="utf-8")
             for name, text in (extra_modules or {}).items():
-                (work / f"{name}.tla").write_text(text)
+                (work / f"{name}.tla").write_text(text, encoding="utf-8")
             argv = [
                 _java(),
                 # JVM options must precede -cp.
@@ -256,7 +260,7 @@ class CliRunner:
                 if dot.is_file():
                     from .graph import parse_dot
 
-                    state_graph = parse_dot(dot.read_text(), max_graph_nodes)
+                    state_graph = parse_dot(dot.read_text(encoding="utf-8"), max_graph_nodes)
             if collect:
                 # Sort by the trailing step number, not lexically: frame 10
                 # must not sort between 1 and 2.
@@ -265,7 +269,7 @@ class CliRunner:
                     return int(digits) if digits else 0
 
                 frames = [
-                    p.read_text() for p in sorted(work.glob(collect), key=step_of)
+                    p.read_text(encoding="utf-8") for p in sorted(work.glob(collect), key=step_of)
                 ]
 
         if trace is not None:

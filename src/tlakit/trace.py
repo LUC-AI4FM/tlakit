@@ -90,5 +90,5 @@ def load_trace(path: Path, declared: list[str] | None = None) -> Trace | None:
     path = Path(path)
     if not path.is_file():
         return None
-    trace = trace_from_json(json.loads(path.read_text()), declared=declared)
+    trace = trace_from_json(json.loads(path.read_text(encoding="utf-8")), declared=declared)
     return trace if trace.states else None

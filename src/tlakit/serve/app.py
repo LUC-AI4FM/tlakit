@@ -42,7 +42,7 @@ def expected_key() -> Optional[str]:
     path = os.environ.get(KEY_FILE_ENV)
     if path:
         try:
-            value = pathlib.Path(path).read_text().strip()
+            value = pathlib.Path(path).read_text(encoding="utf-8").strip()
         except OSError:
             # Refuse every request rather than silently serving unauthenticated
             # because the key file went missing.
@@ -114,7 +114,9 @@ def create_app(runner: Optional[CliRunner] = None, limits: Optional[Limits] = No
     # A single static string, read once at startup. Not a file server: there is
     # no path parameter anywhere, so no route can be talked into reading
     # something else.
-    landing = (pathlib.Path(__file__).parent / "static" / "index.html").read_text()
+    landing = (pathlib.Path(__file__).parent / "static" / "index.html").read_text(
+        encoding="utf-8"
+    )
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):

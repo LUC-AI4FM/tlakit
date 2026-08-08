@@ -232,7 +232,7 @@ class Spec:
 def load(path: str | Path, runner: CliRunner | None = None) -> Spec:
     """Read a `.tla` file from disk."""
     path = Path(path)
-    source = path.read_text()
+    source = path.read_text(encoding="utf-8")
     return Spec(
         source=source, name=module_name_of(source), path=path, runner=runner
     )

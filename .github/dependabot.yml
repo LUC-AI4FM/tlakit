@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Python dependencies. Grouped so a week of patch bumps is one PR to review
+  # rather than six.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+    groups:
+      python-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # Actions are pinned to SHAs, which is only safe if something tells us when
+  # the SHA is stale. This is that something.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5

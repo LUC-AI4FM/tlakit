@@ -199,3 +199,23 @@ def test_keyboard_interrupt_kills_the_child_and_propagates(runner, monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         runner.check(OK, "Ok", OK_CFG)
     assert "pid" in killed, "_terminate was not called on interrupt"
+
+
+def test_unicode_in_a_spec_survives_a_round_trip(runner):
+    """TLA+ allows Unicode operators, so every file and pipe must be UTF-8.
+    Windows defaults to cp1252 and raised UnicodeDecodeError on the landing
+    page for exactly this reason."""
+    spec = (
+        "---- MODULE Uni ----\n"
+        "EXTENDS Naturals\n"
+        "VARIABLE x\n"
+        "\\* TLA⁺ operators: ∀ ∈ ∧ → ≤\n"
+        "Init == x = 0\n"
+        "Next == x' = x + 1\n"
+        "Spec == Init /\\ [][Next]_x\n"
+        "Inv == x < 3\n"
+        "====\n"
+    )
+    result = runner.check(spec, "Uni", "SPECIFICATION Spec\nINVARIANT Inv\n")
+    assert result.outcome is Outcome.INVARIANT_VIOLATION
+    assert [s["x"] for s in result.trace.states] == [0, 1, 2, 3]

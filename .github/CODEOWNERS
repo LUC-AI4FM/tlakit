@@ -1,0 +1,6 @@
+# Review is required on anything touching the sandbox boundary or the
+# deployment surface. Everything else can move without ceremony.
+/src/tlakit/jar.py            @EricSpencer00
+/src/tlakit/serve/            @EricSpencer00
+/.github/workflows/           @EricSpencer00
+/SECURITY.md                  @EricSpencer00

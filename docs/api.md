@@ -84,6 +84,26 @@ docstring for why `1` and `2` are separate.
         - RemoteError
         - Unsupported
 
+::: tlakit.mcp.runner
+    options:
+      members:
+        - McpRunner
+        - McpUnavailable
+
+## The MCP server
+
+::: tlakit.mcp.serve
+    options:
+      members:
+        - McpServer
+        - McpServeError
+        - find_extension
+        - prepare
+        - build
+        - stage
+        - clone
+        - is_stale
+
 ## Locating the toolchain
 
 ::: tlakit.jar

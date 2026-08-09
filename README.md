@@ -186,9 +186,10 @@ pip install -e ".[docs]" && mkdocs serve
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to set up the development environment, download pinned TLA+ jars, run the test suite, and build the documentation.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) covers setting up an environment, fetching
+the pinned TLA+ jars, running the suite, and building the docs. Worth reading
+the part about skipped tests before trusting a green run.
 
 ## License
 
 MIT
-

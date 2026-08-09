@@ -6,6 +6,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # `actionlint` and `zizmor` are required checks, so they have to report on
+  # the queue's own branch too; see the note in ci.yml.
+  merge_group:
   schedule:
     # Weekly, so a newly-published advisory about an action shows up without
     # waiting for the next pull request.
@@ -61,7 +64,11 @@ jobs:
     # OpenSSF Scorecard: an outside opinion on branch protection, pinning,
     # token permissions and dangerous workflow patterns. Runs on main only --
     # it needs repo-level metadata a fork's pull request cannot see.
-    if: github.event_name != 'pull_request'
+    # Not in the merge queue either: it is not a required check, it wants
+    # repo-level metadata, and the queue branch is deleted the moment the
+    # entry merges. `!= 'pull_request'` alone would have started running it on
+    # every queued entry, since the queue's event is `merge_group`.
+    if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
     runs-on: ubuntu-latest
     permissions:
       security-events: write

@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The merge queue tests each entry on a branch of its own, built from main
+  # plus the entries ahead of it. Without this trigger nothing ever reports on
+  # that branch, so every queued pull request waits out the timeout and is
+  # ejected -- which looks like the queue being broken rather than a missing
+  # trigger. A required check must run here or it can never be satisfied.
+  merge_group:
   workflow_dispatch:
 
 # This workflow only needs to read the repository. The default token grant is

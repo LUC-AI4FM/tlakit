@@ -46,6 +46,27 @@ docstring for why `1` and `2` are separate.
         - RawOutput
         - flatten_state
 
+## State graph
+
+::: tlakit.graph
+    options:
+      members:
+        - StateGraph
+        - Node
+        - Edge
+        - GraphBuilder
+        - parse_ndjson
+        - parse_dot
+        - parse_state_label
+        - path_through
+
+::: tlakit.statewriter
+    options:
+      members:
+        - class_directory
+        - javac_executable
+        - StateWriterUnavailable
+
 ## Runners
 
 ::: tlakit.cli

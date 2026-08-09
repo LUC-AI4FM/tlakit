@@ -17,6 +17,7 @@ import pytest
 from tlakit.dap import (
     DapClient,
     DebuggerError,
+    DebuggerTimeout,
     DebugSession,
     next_relation,
     relation_lines,
@@ -262,6 +263,115 @@ def test_closing_twice_is_harmless(ready):
     session = DebugSession(SPIKE, "Spike", SPEC_CONFIG)
     session.close()
     session.close()
+
+
+# --------------------------------------------------------------------------
+# Connecting, without a debugger. A real TLC always suspends before the first
+# ASSUME promptly, so the *absence* of that stop is not something a java test
+# can stage -- and it is the case that has to be got right, because getting it
+# wrong is silent.
+# --------------------------------------------------------------------------
+
+
+class _SilentClient:
+    """A DAP client that answers requests and never announces a stop."""
+
+    stops = 0
+
+    def __init__(self, *_: object, **__: object):
+        self.commands: list[str] = []
+        self.closed = False
+        self._left = self.stops
+
+    def request(self, command: str, timeout: float = 30.0, **arguments: object) -> dict:
+        self.commands.append(command)
+        return {}
+
+    def send(self, command: str, **arguments: object) -> int:
+        self.commands.append(command)
+        return 1
+
+    def wait_for_event(self, name: str, timeout: float = 30.0) -> dict | None:
+        if self._left <= 0:
+            return None
+        self._left -= 1
+        return {"event": name}
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _StoppingClient(_SilentClient):
+    """The same, but it does deliver the pre-ASSUME stop."""
+
+    stops = 1
+
+
+class _FakeProcess:
+    stdout = None
+
+    def __init__(self) -> None:
+        self.terminated = False
+
+    def poll(self) -> int | None:
+        return None
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def wait(self, timeout: float | None = None) -> int:
+        return 0
+
+    def kill(self) -> None:  # pragma: no cover - terminate always succeeds here
+        self.terminated = True
+
+
+def _unstarted_session(tmp_path) -> DebugSession:
+    """A session with everything `_connect` and `close` touch, and no JVM."""
+    session = DebugSession.__new__(DebugSession)
+    session._module = "Spike"
+    session._work = tmp_path
+    session._lines = [5]
+    session._port = 4712
+    session._client = None
+    session._terminated = False
+    session._exhausted = False
+    session._process = _FakeProcess()
+    return session
+
+
+def test_a_missing_pre_assume_stop_is_a_timeout_not_a_silent_desync(monkeypatch, tmp_path):
+    """Dropping the result of that wait is worse than useless.
+
+    On a slow runner the pre-ASSUME stop can miss the deadline, and then it is
+    still queued: the caller's first `step()` consumes it as though `continue`
+    had produced it, returns a `Step`, and every later read is one stop ahead
+    of TLC. It surfaced on CI as `evaluate("door")` answering "the identifier
+    door is either undefined or not an operator" -- an "undefined identifier" a
+    long way from "the debugger never stopped".
+    """
+    import tlakit.dap as dap
+
+    monkeypatch.setattr(dap, "DapClient", _SilentClient)
+    session = _unstarted_session(tmp_path)
+
+    with pytest.raises(DebuggerTimeout, match="ASSUME"):
+        session._connect(0.05)
+
+    assert session._process.terminated, "a failed connect must not leak a JVM"
+
+
+def test_a_delivered_pre_assume_stop_is_consumed_and_connect_succeeds(monkeypatch, tmp_path):
+    """The other half: the check must not reject the normal case."""
+    import tlakit.dap as dap
+
+    monkeypatch.setattr(dap, "DapClient", _StoppingClient)
+    session = _unstarted_session(tmp_path)
+
+    session._connect(0.05)
+
+    assert session._client.commands == ["initialize", "setBreakpoints", "launch"]
+    assert not session._process.terminated
 
 
 # --------------------------------------------------------------------------

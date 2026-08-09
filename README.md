@@ -176,6 +176,11 @@ Build the site locally with:
 pip install -e ".[docs]" && mkdocs serve
 ```
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to set up the development environment, download pinned TLA+ jars, run the test suite, and build the documentation.
+
 ## License
 
 MIT
+

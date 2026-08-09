@@ -1,0 +1,62 @@
+name: Bug Report
+description: Report a bug to help us improve tlakit
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug! Please fill out the information below.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: How do we reproduce this? Please include the TLA+ code or Python script if possible.
+      placeholder: |
+        1. Run `...`
+        2. See error `...`
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: A clear and concise description of what you expected to happen.
+    validations:
+      required: true
+  - type: input
+    id: tlakit-version
+    attributes:
+      label: tlakit version
+      description: Run `python -c "import tlakit; print(tlakit.__version__)"`
+      placeholder: e.g., 0.0.1
+    validations:
+      required: true
+  - type: input
+    id: java-version
+    attributes:
+      label: Java version
+      description: Run `java -version` and paste the output.
+      placeholder: e.g., openjdk version "21.0.2" 2024-01-16
+    validations:
+      required: true
+  - type: input
+    id: jar-tags
+    attributes:
+      label: Pinned Jar Tag / Environment variables
+      description: The tag/version of the jars being used (e.g., `v1.8.0` for tla2tools.jar, `202607311834` for CommunityModules-deps.jar) or values of `TLAKIT_TLA2TOOLS` and `TLAKIT_COMMUNITY_MODULES`.
+      placeholder: e.g., v1.8.0 / 202607311834
+    validations:
+      required: true
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other context, traceback, log outputs, or screenshots.

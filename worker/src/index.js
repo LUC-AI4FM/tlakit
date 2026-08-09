@@ -85,7 +85,8 @@ export default {
     if (request.method === "POST") {
       // Content-Length can lie or be absent; measure what actually arrived.
       const raw = await request.text();
-      if (raw.length > MAX_BODY_BYTES) {
+      const byteLen = new TextEncoder().encode(raw).byteLength;
+      if (byteLen > MAX_BODY_BYTES) {
         return json(
           { error: `body exceeds ${MAX_BODY_BYTES} bytes` },
           413,

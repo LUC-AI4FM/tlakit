@@ -327,3 +327,43 @@ def test_a_real_parse_error_exits_one(tmp_path, java_or_skip, capsys):
     assert code == FOUND_A_PROBLEM
     assert "PARSE_ERROR" in out
     assert "error:" in out
+
+
+def test_version_prints_version_and_exits_zero(capsys):
+    import tlakit
+    with pytest.raises(SystemExit) as caught:
+        main(["--version"])
+    assert caught.value.code in (0, None)
+    out, err = capsys.readouterr()
+    combined = out + err
+    assert tlakit.__version__ in combined
+    assert "tlakit" in combined
+
+
+def test_version_contains_jar_path_when_available(monkeypatch, capsys):
+    from pathlib import Path
+    mock_path = Path("/mock/path/to/tla2tools.jar")
+    monkeypatch.setattr("tlakit.cli_main.find_tools_jar", lambda: mock_path)
+
+    with pytest.raises(SystemExit) as caught:
+        main(["--version"])
+    assert caught.value.code in (0, None)
+    out, err = capsys.readouterr()
+    combined = out + err
+    assert str(mock_path) in combined
+
+
+def test_version_without_jar_does_not_fail(monkeypatch, capsys):
+    from tlakit.jar import JarNotFound
+    def mock_find():
+        raise JarNotFound("Mock jar not found")
+    monkeypatch.setattr("tlakit.cli_main.find_tools_jar", mock_find)
+
+    with pytest.raises(SystemExit) as caught:
+        main(["--version"])
+    assert caught.value.code in (0, None)
+    out, err = capsys.readouterr()
+    combined = out + err
+    assert "tlakit" in combined
+    assert "Mock jar not found" not in combined
+

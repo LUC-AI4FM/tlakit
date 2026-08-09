@@ -1,6 +1,11 @@
 """Locate the TLA+ tool jars.
 
-Resolution order: explicit path -> environment variable -> installed pin -> platformdirs cache.
+Resolution order: explicit path -> environment variable -> platformdirs cache.
+
+Within the cache, the newest version directory wins. That is a comparison of
+version *numbers*, not of strings: sorting the names lexically puts `v1.9.0`
+above `v1.10.0`, which would pin a user to an older toolchain every time the
+minor version reached double digits (#91).
 """
 from __future__ import annotations
 
@@ -43,12 +48,11 @@ def _version_key(path: Path) -> tuple[int, ...]:
     """
     tag = path.parent.name
     parts = re.findall(r"\d+", tag)
-    if parts:
-        try:
-            return tuple(int(p) for p in parts)
-        except ValueError:
-            pass
-    return (-1,)
+    if not parts:
+        return (-1,)
+    # No try/except around int(): `\d+` only ever yields digits, and Python
+    # integers do not overflow, so there is nothing here that can raise.
+    return tuple(int(p) for p in parts)
 
 
 def _candidates(explicit: Path | None, env_var: str, filename: str) -> list[Path]:
@@ -58,20 +62,6 @@ def _candidates(explicit: Path | None, env_var: str, filename: str) -> list[Path
     from_env = os.environ.get(env_var)
     if from_env:
         found.append(Path(from_env))
-
-    pinned_path: Path | None = None
-    if filename == TOOLS_JAR:
-        from .install import TOOLS
-
-        pinned_path = TOOLS.path
-    elif filename == COMMUNITY_JAR:
-        from .install import COMMUNITY
-
-        pinned_path = COMMUNITY.path
-
-    if pinned_path is not None and pinned_path not in found:
-        found.append(pinned_path)
-
     # Cached jars live under a version directory so a new pin never overwrites
     # an older one; newest tag wins when several are present.
     root = cache_dir()

@@ -56,6 +56,7 @@ environment variable, then the platformdirs cache that `tlakit.install` writes.
 | `TLAKIT_TLA2TOOLS` | `tlakit.jar.find_tools_jar` | Path to `tla2tools.jar`. Re-read on every `default_runner()` call, so changing it takes effect immediately rather than being masked by a cached runner. |
 | `TLAKIT_COMMUNITY_MODULES` | `tlakit.jar.find_community_jar` | Path to `CommunityModules-deps.jar`. Optional: without it, `SVG.tla`, `IOUtils`, and the rest of the community modules are simply unavailable. |
 | `TLAKIT_JAVA` | `tlakit.cli.java_executable` | Path to a `java` binary, overriding `PATH`. For a machine with several JVMs where the first on `PATH` is the wrong one. |
+| `TLAKIT_JAVAC` | `tlakit.statewriter.javac_executable` | Path to a `javac` binary, used once to compile the `IStateWriter` that streams the state graph. Unset, tlakit looks for a `javac` beside `TLAKIT_JAVA` and then on `PATH`; finding none is not an error — the graph comes from `-dump dot` instead. |
 | `TLAKIT_SERVE_KEY` | `tlakit.serve.app` | Shared secret required on requests to a `tlakit.serve` instance. Unset means the service is unauthenticated, which is only appropriate behind something else that authenticates. |
 | `TLAKIT_APALACHE` | `tlakit.apalache.find_apalache` | Path to the `apalache-mc` launcher, overriding `PATH`. Apalache is a 180 MB tarball rather than a jar, so `tlakit.install` does not fetch it — this is how you point at your own. |
 | `TLAKIT_TLAPM` | `tlakit.tlaps.find_tlapm` | Path to the `tlapm` binary. TLAPS is a 1.1 GB download unpacking to ~3 GB (it bundles Isabelle), so `tlakit.install` does not fetch it. On Apple Silicon you need the `arm64-darwin` asset from the `1.6.0-pre` release — the 1.5.0 installers are i386 and will not run. |
@@ -76,6 +77,33 @@ Anything running untrusted specs must therefore isolate the *directory*, not
 just the classpath. `tlakit.jar.assert_isolated()` and
 `CliRunner(community_jar=False)` are the supported way; `tlakit.serve` uses
 both.
+
+### The state graph
+
+`check(..., graph=True)` fills `CheckResult.graph`. The graph comes from
+tlakit's own `tlc2.util.IStateWriter` — `src/tlakit/java/TlakitStateWriter.java`
+— which TLC hands each state and edge to as it generates them, and which writes
+one NDJSON record per state and per edge. tlakit reads that file while TLC is
+still running, so:
+
+- a run stopped by `timeout` still returns the states it reached, where
+  `-dump dot` would have left nothing at all;
+- `max_graph_nodes` stops holding states at the limit rather than after the
+  whole graph has been written out and read back.
+
+The writer is compiled once with `javac`, against the same `tla2tools.jar` the
+run uses, and cached under platformdirs beside the jars. A JRE can run TLC but
+cannot compile it; **that is a fallback, not an error** — tlakit passes
+`-dump dot` instead and parses the file afterwards. The graph is identical
+either way (`tests/test_statewriter.py` compares the two routes state for
+state); only the streaming and the partial-result behaviour are lost. Set
+`TLAKIT_JAVAC` to point at a compiler, or read `CheckResult.raw.argv` to see
+which route a given run took.
+
+State ids are TLC's own fingerprints, and are only comparable *within* one run
+unless `-fp` is passed: TLC picks its fingerprint polynomial per run. Variable
+values are TLA+ source text, not decoded JSON — use `result.trace` for
+structured values.
 
 ---
 

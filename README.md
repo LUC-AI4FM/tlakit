@@ -128,7 +128,7 @@ keep working.
 
 ## Status
 
-0.1.0 is the first release. Everything shown above is implemented: the Python
+0.1.1 is the first release. Everything shown above is implemented: the Python
 API and `sweep`, the `tlakit` command, the `%%tla` / `%%tlc` magics, the Jupyter
 kernel, and HTML rendering of counterexamples and diagnostics.
 

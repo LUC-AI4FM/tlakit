@@ -97,9 +97,10 @@ never resolves to one by accident; it takes `--pre` to ask for it.
 1. Set the version in `pyproject.toml` **and** `src/tlakit/__init__.py`. Both
    are checked against the tag, and against each other by
    `tests/test_version.py`.
-2. Update `lite/` to match: build the wheel, replace the one in `lite/wheels/`,
-   and point `piplite_urls` in `lite/jupyter_lite_config.json` at the new
-   filename. A stale wheel there is shipped silently — see `lite/README.md`.
+2. Run `python tools/lite_wheel.py --sync` to rebuild the wheel the JupyterLite
+   site serves and repoint `piplite_urls` at it. `tests/test_lite_wheel.py`
+   fails if you forget, which matters because a stale wheel there is otherwise
+   shipped silently — see `lite/README.md`.
 3. Merge that to `main`.
 4. Tag and push:
 
@@ -126,6 +127,7 @@ checking the pipeline itself.
 | `twine check --strict` | PyPI rejects a bad long_description *after* upload starts, leaving a half-published release |
 | install the wheel, import it from outside the source tree | a missing module or missing package data passes the test suite and fails only here |
 | rebuild the wheel from the sdist | a sdist that cannot rebuild is not a source distribution |
+| the JupyterLite wheel matches the version (in the test suite, not the release job) | it fails silently otherwise: the site builds and serves an old tlakit to every visitor |
 
 That fourth one is not hypothetical: building the sdist for the first time swept
 in the JupyterLite build venv and its 64 MB of output.

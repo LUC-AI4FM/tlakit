@@ -141,10 +141,18 @@ keep working.
 
 ## Status
 
-M1 is complete: `CliRunner`, normalized results, `%%tla` / `%%tlc` magics,
-and static HTML rendering of counterexamples and diagnostics. See
-`docs/superpowers/specs/` for the design and `docs/superpowers/plans/` for the
-implementation plan.
+0.1.1 is the first release. Everything shown above is implemented: the Python
+API and `sweep`, the `tlakit` command, the `%%tla` / `%%tlc` magics, the Jupyter
+kernel, and HTML rendering of counterexamples and diagnostics.
+
+Every push to `main` also publishes a dev build to
+[TestPyPI](https://test.pypi.org/project/tlakit/), so a fix is installable
+before it is released:
+
+```bash
+pip install --index-url https://test.pypi.org/simple/ \
+            --extra-index-url https://pypi.org/simple/ --pre tlakit
+```
 
 ## Requirements
 

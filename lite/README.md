@@ -50,7 +50,7 @@ changes a spec.
 
 ```bash
 uv venv .lite-venv && uv pip install --python .lite-venv/bin/python -r lite/requirements-build.txt
-uv build --wheel -o dist && cp dist/tlakit-*.whl lite/wheels/
+python tools/lite_wheel.py --sync
 cd lite && ../.lite-venv/bin/jupyter lite build
 python3 lite/serve.py --port 8780      # threaded and no-store on purpose; see serve.py
 ```
@@ -60,9 +60,16 @@ so the site needs no PyPI at runtime. Rebuild the wheel whenever tlakit changes
 or the notebook installs a stale copy — a library fix does not reach a visitor
 until it does.
 
-`jupyter_lite_config.json` names that wheel by filename, so bumping the version
-in `pyproject.toml` means deleting the old wheel and editing `piplite_urls` to
-match. Leave the stale one in place and the build keeps shipping it, silently.
+`jupyter_lite_config.json` names that wheel by filename, which used to make a
+version bump a three-step manual edit: build, delete the old wheel, retype the
+name in `piplite_urls`. `tools/lite_wheel.py --sync` does all three, and is
+safe to re-run — on an up-to-date tree it produces no diff.
+
+Its `--check` half runs in the test suite (`tests/test_lite_wheel.py`), because
+this is the one version that fails *quietly*. A stale wheel builds fine and
+serves an old tlakit to every visitor. That is not hypothetical: the 0.1.0
+wheel was committed, the branch was then rebased onto a main that had gained
+two features, and the committed wheel had neither.
 
 `overrides.json` carries JupyterLab settings the site needs changed from their
 defaults. The build copies it into the site and patches it into

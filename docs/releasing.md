@@ -121,7 +121,8 @@ checking the pipeline itself.
 
 | Check | Why |
 |---|---|
-| tag matches `pyproject` version | a mistagged release would ship the wrong version under the right name |
+| the tag is an ancestor of `main` | tagging the release PR's own branch builds a release missing whatever merged since it was cut — and because merging is squash-only, that commit never joins main's history, so `git describe` stops seeing the tag and dev versions keep counting from the release before it |
+| tag matches `pyproject` version *and* `__version__` | a mistagged release would ship the wrong version under the right name |
 | `twine check --strict` | PyPI rejects a bad long_description *after* upload starts, leaving a half-published release |
 | install the wheel, import it from outside the source tree | a missing module or missing package data passes the test suite and fails only here |
 | rebuild the wheel from the sdist | a sdist that cannot rebuild is not a source distribution |

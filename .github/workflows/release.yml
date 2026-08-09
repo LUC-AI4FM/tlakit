@@ -52,6 +52,26 @@ jobs:
       - name: Install build tooling
         run: python -m pip install --upgrade build twine
 
+      - name: A release tag must be on main
+        # Learned the hard way: v0.1.0 was first pushed onto the release PR's
+        # own branch. It built and very nearly published a release missing two
+        # features that were already on main.
+        #
+        # The quieter half of that mistake is that merging is squash-only here,
+        # so the tagged commit never becomes an ancestor of main -- and
+        # `git describe` only sees tags reachable from HEAD. Dev builds would
+        # have kept counting from the *previous* release forever, never rising
+        # above the version that had just shipped.
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::$GITHUB_REF_NAME is not on main. Merge first, then tag the commit on main."
+            exit 1
+          fi
+          echo "$GITHUB_REF_NAME is on main"
+
       - name: Settle the version to build
         # Runs *before* the build, because it may rewrite the version the build
         # reads. On a tag this only checks; on main it also writes.

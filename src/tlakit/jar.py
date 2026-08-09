@@ -1,12 +1,11 @@
 """Locate the TLA+ tool jars.
 
-Resolution order: explicit path -> environment variable -> platformdirs cache.
-Downloading a pinned release is deliberately left to M2; until then a missing
-jar is a clear, actionable error rather than a silent fetch.
+Resolution order: explicit path -> environment variable -> installed pin -> platformdirs cache.
 """
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 TOOLS_JAR = "tla2tools.jar"
@@ -36,6 +35,22 @@ def cache_dir() -> Path:
     return Path(platformdirs.user_cache_dir("tlakit"))
 
 
+def _version_key(path: Path) -> tuple[int, ...]:
+    """Parse a version directory tag into a tuple of ints for version-based sorting.
+
+    Handles 'v1.10.0', 'v1.9.0', '202607311834', etc.
+    Unparseable tags return (-1,) so they sort last.
+    """
+    tag = path.parent.name
+    parts = re.findall(r"\d+", tag)
+    if parts:
+        try:
+            return tuple(int(p) for p in parts)
+        except ValueError:
+            pass
+    return (-1,)
+
+
 def _candidates(explicit: Path | None, env_var: str, filename: str) -> list[Path]:
     found: list[Path] = []
     if explicit is not None:
@@ -43,12 +58,31 @@ def _candidates(explicit: Path | None, env_var: str, filename: str) -> list[Path
     from_env = os.environ.get(env_var)
     if from_env:
         found.append(Path(from_env))
+
+    pinned_path: Path | None = None
+    if filename == TOOLS_JAR:
+        from .install import TOOLS
+
+        pinned_path = TOOLS.path
+    elif filename == COMMUNITY_JAR:
+        from .install import COMMUNITY
+
+        pinned_path = COMMUNITY.path
+
+    if pinned_path is not None and pinned_path not in found:
+        found.append(pinned_path)
+
     # Cached jars live under a version directory so a new pin never overwrites
     # an older one; newest tag wins when several are present.
     root = cache_dir()
     if root.is_dir():
-        found.extend(sorted(root.glob(f"*/{filename}"), reverse=True))
-    found.append(root / filename)
+        globbed = sorted(root.glob(f"*/{filename}"), key=_version_key, reverse=True)
+        for p in globbed:
+            if p not in found:
+                found.append(p)
+    legacy = root / filename
+    if legacy not in found:
+        found.append(legacy)
     return found
 
 

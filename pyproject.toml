@@ -88,4 +88,5 @@ markers = [
     "java: requires Java and tla2tools.jar",
     "apalache: requires the apalache-mc launcher",
     "tlaps: requires the tlapm binary",
+    "mcp: requires node and a vscode-tlaplus checkout",
 ]

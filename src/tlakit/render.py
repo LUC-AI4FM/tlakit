@@ -6,7 +6,7 @@ nbconvert export, a plain `str()`. `TraceView` is richer: it scrubs through a
 trace one step at a time instead of dumping every step into one table, which
 stops being usable past a handful of states.
 
-That richness is optional. `anywidget` (M2's addition) is declared under the
+That richness is optional. `anywidget` is declared under the
 `widget` extra, not as a hard dependency, so `import tlakit` and every static
 render path must keep working with it absent. The import below is guarded;
 when anywidget is missing, `TraceView` still exists and still holds the same

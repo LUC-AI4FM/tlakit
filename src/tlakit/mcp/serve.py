@@ -8,8 +8,8 @@ webviews. `js/` holds what it takes to run it anyway: a `vscode` shim, a stub
 for the language client, a bootstrap, and an esbuild config. This module stages
 those into an extension checkout, bundles them, and launches the result.
 
-Three things this does that the M0 spike did not, each because the spike was
-wrong about it:
+Three things this does that the original spike did not, each because the spike
+was wrong about it:
 
 - **`activate()` failing is fatal.** It creates the diagnostic collection the
   MCP handlers read through `getDiagnostic()`, so a shim that half-activates

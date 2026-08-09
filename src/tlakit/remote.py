@@ -128,9 +128,9 @@ def default_transport() -> Callable[[str, str, bytes | None, float], tuple[int, 
 class RemoteRunner:
     """A `CliRunner`-shaped client for the public checking service."""
 
-    #: The service exposes checking only, so callers that parse merely to give
-    #: fast feedback -- `%%tla` above all -- can skip it instead of failing.
-    can_parse = False
+    #: The service exposes `/parse` (#67), so `%%tla` gets a real answer in the
+    #: browser rather than reporting only that a module was defined.
+    can_parse = True
 
     endpoint: str = DEFAULT_ENDPOINT
     timeout: float = DEFAULT_TIMEOUT
@@ -165,18 +165,27 @@ class RemoteRunner:
             raise RemoteError(f"{url} returned {status}: {detail}", status=status)
         return body
 
-    def parse(self, source: str, module: str) -> CheckResult:
-        """Not available remotely.
+    def parse(
+        self, source: str, module: str, timeout: float | None = None
+    ) -> CheckResult:
+        """Syntax- and level-check a module through the service's SANY.
 
-        The service exposes checking only. Parsing alone would need a second
-        endpoint, and SANY's value is mostly in fast local feedback -- which a
-        network round trip does not provide anyway.
+        `module` is unused: the service derives the name from the module header
+        itself, the same way `/check` does, so a client cannot ask for one
+        module's text to be parsed under another's name. It stays in the
+        signature because `CliRunner.parse` takes it and the two are meant to
+        be interchangeable.
+
+        `timeout` is likewise accepted and not sent. A parse has no search to
+        bound, and the service clamps what it spends regardless -- taking the
+        argument and quietly ignoring it is better than raising Unsupported at
+        a caller who passed a harmless default.
+
+        The response carries no source, so `source=` puts it back: it is what
+        renders the offending line under a diagnostic.
         """
-        raise Unsupported(
-            "the remote runner cannot parse; SANY is not exposed by the "
-            "service. Check the spec instead -- TLC parses before it explores, "
-            "so syntax errors surface from check()."
-        )
+        body = self._send("/parse", {"spec": source})
+        return from_json(body, source=source)
 
     def eval(
         self,

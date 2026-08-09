@@ -201,6 +201,202 @@ def test_only_health_and_check_are_routed(client):
     assert client.get("/files").status_code == 404
 
 
+# --- raw .tla upload (#64) ------------------------------------------------
+
+
+@pytest.mark.java
+def test_a_spec_can_be_uploaded_instead_of_json_escaped(client):
+    """`curl -F spec=@Counter.tla`. A TLA+ module is full of newlines,
+    backslashes and quotes, which is the worst case for hand-escaping JSON."""
+    response = client.post(
+        "/check",
+        files={
+            "spec": ("Counter.tla", SPEC),
+            "cfg": ("Counter.cfg", "SPECIFICATION Spec\nINVARIANT Inv\n"),
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["outcome"] == "invariant_violation"
+    assert [s["x"] for s in body["trace"]["states"]] == [0, 1, 2, 3]
+
+
+#: SPEC counts up forever, so with no invariant to trip it just runs until the
+#: timeout. The upload tests care about the body being read, not about the
+#: search, so they use a spec that finishes.
+BOUNDED = SPEC.replace(
+    "Next == x' = x + 1", "Next == IF x < 2 THEN x' = x + 1 ELSE x' = x"
+)
+
+
+@pytest.mark.java
+def test_an_upload_without_a_cfg_still_checks(client):
+    body = client.post("/check", files={"spec": ("Counter.tla", BOUNDED)}).json()
+    assert body["ok"] is True
+
+
+@pytest.mark.java
+def test_the_module_name_never_comes_from_the_filename(client):
+    """The filename is attacker-controlled; the module header is not."""
+    body = client.post("/check", files={"spec": ("../../etc/passwd", BOUNDED)}).json()
+    assert body["ok"] is True
+    assert "passwd" not in repr(body)
+
+
+@pytest.mark.java
+def test_an_upload_over_the_cap_is_refused_before_it_is_read(client):
+    """The cap has to bite on the declared length, not on a buffer.
+
+    Starlette's own `max_part_size` does not cover this: it counts bytes held
+    in memory and a *file* part is spooled to disk, so an upload sails past it.
+    Measured before this was written -- a 69 KB part reached `validate()`.
+    """
+    response = client.post(
+        "/check", files={"spec": ("Big.tla", "x" * (LIMITS.spec_bytes + 5000))}
+    )
+    assert response.status_code == 413
+    assert str(LIMITS.spec_bytes) in response.json()["detail"]
+
+
+@pytest.mark.java
+def test_a_multipart_body_without_a_spec_part_says_so(client):
+    response = client.post("/check", files={"cfg": ("x.cfg", "INVARIANT Inv")})
+    assert response.status_code == 422
+    assert "spec" in str(response.json()["detail"])
+
+
+@pytest.mark.java
+def test_the_json_form_is_untouched_by_the_upload_path(client):
+    """Dispatching on content-type must not change the original contract:
+    unknown fields are still refused rather than ignored."""
+    assert client.post("/check", json={"spec": SPEC, "extra_opts": ["-dump"]}).status_code == 422
+    assert client.post(
+        "/check", content=b"{not json", headers={"content-type": "application/json"}
+    ).status_code == 422
+
+
+
+# --- parsing (#67) --------------------------------------------------------
+
+
+@pytest.mark.java
+def test_a_sound_module_parses(client):
+    body = client.post("/parse", json={"spec": SPEC}).json()
+    assert body["outcome"] == "ok"
+    assert body["ok"] is True
+    assert body["diagnostics"] == []
+
+
+@pytest.mark.java
+def test_a_syntax_error_comes_back_with_its_line(client):
+    """The reason to expose SANY at all: in a browser there is no local parse,
+    so `%%tla` can only say a module was defined. A line number is what makes
+    this better than waiting for the reader to write a config."""
+    broken = "---- MODULE B ----\nEXTENDS Naturals\nInit == \n====\n"
+    response = client.post("/parse", json={"spec": broken})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["outcome"] == "parse_error"
+    assert body["ok"] is False
+    assert body["diagnostics"], "a parse error with no diagnostic says nothing"
+    assert any(d["line"] for d in body["diagnostics"])
+
+
+@pytest.mark.java
+def test_parsing_never_explores(client):
+    """No config is accepted and no search runs, so there is no trace, no
+    graph, and nothing to report about a state space."""
+    body = client.post("/parse", json={"spec": SPEC}).json()
+    assert body["trace"] is None
+    assert body["graph"] is None
+    assert body["stats"]["distinct"] is None
+
+
+@pytest.mark.java
+def test_parse_takes_a_spec_and_nothing_else(client):
+    """Same reasoning as /check: a client sending `config` should be told it
+    does not exist, not have it silently dropped."""
+    response = client.post(
+        "/parse", json={"spec": SPEC, "config": "INVARIANT Inv\n"}
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.java
+def test_parse_refuses_what_check_refuses(client):
+    assert client.post("/parse", json={"spec": "not a module"}).status_code == 422
+    assert client.post("/parse", json={"spec": "  "}).status_code == 422
+    big = {"spec": "x" * (LIMITS.spec_bytes + 10)}
+    assert client.post("/parse", json=big).status_code == 422
+
+
+@pytest.mark.java
+def test_parsing_cannot_reach_community_modules(client):
+    """A parse loads modules, so the isolation property has to hold here too --
+    EXTENDS IOUtils must not resolve."""
+    response = client.post("/parse", json={"spec": EVIL})
+    body = response.json()
+    assert body["ok"] is False
+    assert "PWNED" not in repr(body)
+
+
+@pytest.mark.java
+def test_a_parse_response_carries_no_filesystem_paths(client):
+    """SANY prints the absolute path of every file it reads -- the temp dir,
+    and the jar. `/check` never had this exposure because TLC's diagnostics do
+    not quote paths the same way; a parse failure does."""
+    import re
+
+    probes = [
+        "---- MODULE Evil ----\nEXTENDS Naturals, IOUtils\nVARIABLE x\n====\n",
+        "---- MODULE B ----\nEXTENDS Naturals\nInit == \n====\n",
+        "---- MODULE C ----\nEXTENDS NoSuchModuleHere\n====\n",
+    ]
+    leak = re.compile(r"/private/|/Users/|/var/folders/|tlakit-[a-z0-9]{6}")
+    for spec in probes:
+        text = client.post("/parse", json={"spec": spec}).text
+        assert not leak.search(text), f"{spec.splitlines()[0]} leaked: {text[:300]}"
+
+
+@pytest.mark.java
+def test_a_public_parse_runs_under_a_bounded_heap(client, monkeypatch):
+    """An unset -Xmx lets a JVM take a quarter of the machine. That is fine for
+    a developer parsing their own module and not for an endpoint parsing
+    anyone's, so `serve` passes its own cap."""
+    from tlakit.serve import Limits
+
+    from tlakit.cli import CliRunner
+
+    original = CliRunner.parse
+    seen = {}
+
+    def spy(self, source, module, timeout=None, heap=None):
+        seen["heap"] = heap
+        return original(self, source, module, timeout=timeout, heap=heap)
+
+    monkeypatch.setattr(CliRunner, "parse", spy, raising=True)
+    body = client.post("/parse", json={"spec": SPEC}).json()
+
+    assert seen["heap"] == Limits().parse_heap
+    # And it really reached the JVM, rather than being accepted and dropped.
+    assert body["outcome"] == "ok"
+
+
+def test_parsing_is_allowed_far_more_often_than_checking():
+    """A parse costs a SANY invocation and no search, so the budget that
+    protects the state space is the wrong one to spend on it."""
+    from tlakit.serve.limiter import CHECK_RULES, PARSE_RULES
+
+    assert PARSE_RULES[0].limit > CHECK_RULES[0].limit
+    assert PARSE_RULES[0].window == CHECK_RULES[0].window
+
+
+@pytest.mark.java
+def test_health_reports_the_parse_budget(client):
+    body = client.get("/health").json()
+    assert body["limits"]["parses_per_minute"] > body["limits"]["checks_per_minute"]
+
+
 # --- shared key with the edge Worker -------------------------------------
 
 

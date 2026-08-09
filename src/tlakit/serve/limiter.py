@@ -53,6 +53,21 @@ class Rule:
 #:
 #: The hourly ceiling is what catches sustained abuse, as opposed to bursts.
 CHECK_RULES = (Rule(limit=30, window=60), Rule(limit=300, window=3600))
+#: Parsing (#67) gets its own budget, well above checking's.
+#:
+#: The number above is sized for the cost of a *search*. A parse has none: SANY
+#: reads the module, resolves its EXTENDS, level-checks, and stops. There is no
+#: state space, so the thing CHECK_RULES is rationing does not exist here, and
+#: spending a check's budget on a parse would price the cheap operation like
+#: the expensive one.
+#:
+#: This is what makes `%%tla` in the browser worth having. A module cell parses
+#: on every edit -- that is the point of it, and the rate a person types is the
+#: rate this has to survive. 120/minute is two a second, which no one reaches by
+#: hand and which a runaway loop still cannot use to hurt the box: the parse
+#: semaphore in `serve/app.py` is what bounds concurrent JVMs, and it does not
+#: depend on this number.
+PARSE_RULES = (Rule(limit=120, window=60), Rule(limit=1200, window=3600))
 #: The page and health endpoint are cheap, but not free, and an open redirect of
 #: traffic through them would still cost bandwidth.
 CHEAP_RULES = (Rule(limit=120, window=60),)

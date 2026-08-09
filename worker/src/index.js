@@ -15,7 +15,8 @@
  */
 
 const MAX_BODY_BYTES = 64 * 1024; // must not exceed the origin's own cap
-const ALLOWED_PATHS = new Set(["/check", "/health"]);
+const ALLOWED_PATHS = new Set(["/check", "/parse", "/health"]);
+const POST_PATHS = new Set(["/check", "/parse"]);
 const UPSTREAM_TIMEOUT_MS = 40_000; // origin caps a check at 30s
 
 const CORS = {
@@ -42,7 +43,7 @@ export default {
     if (!ALLOWED_PATHS.has(url.pathname)) {
       return json({ error: "not found" }, 404);
     }
-    if (url.pathname === "/check" && request.method !== "POST") {
+    if (POST_PATHS.has(url.pathname) && request.method !== "POST") {
       return json({ error: "use POST" }, 405);
     }
     if (url.pathname === "/health" && request.method !== "GET") {
@@ -51,8 +52,16 @@ export default {
 
     // Rate limit by client address. Keyed per path so /health cannot exhaust
     // the budget that /check needs.
+    //
+    // /parse draws on a separate, much larger binding rather than sharing
+    // /check's. Keying by path already gives each its own counter, but not its
+    // own *limit* -- and a parse costs a SANY invocation with no state space,
+    // so pricing it like a check would throttle the fast feedback it exists to
+    // provide. A module cell parses on every edit.
     const who = request.headers.get("cf-connecting-ip") ?? "unknown";
-    const { success } = await env.CHECK_LIMITER.limit({
+    const limiter =
+      url.pathname === "/parse" ? env.PARSE_LIMITER : env.CHECK_LIMITER;
+    const { success } = await limiter.limit({
       key: `${url.pathname}:${who}`,
     });
     if (!success) {
@@ -61,6 +70,16 @@ export default {
         429,
       );
     }
+
+    // A TLA+ module is full of exactly what JSON escaping is worst at, so
+    // /check also takes `-F spec=@Counter.tla` (#64). That body is not JSON
+    // and must not be parsed as such -- but it is still measured, and the
+    // origin still applies its own cap.
+    const contentType = request.headers.get("content-type") ?? "";
+    const isMultipart = contentType
+      .split(";")[0]
+      .trim()
+      .toLowerCase() === "multipart/form-data";
 
     let body = null;
     if (request.method === "POST") {
@@ -72,10 +91,12 @@ export default {
           413,
         );
       }
-      try {
-        JSON.parse(raw); // fail here rather than at the origin
-      } catch {
-        return json({ error: "body must be JSON" }, 400);
+      if (!isMultipart) {
+        try {
+          JSON.parse(raw); // fail here rather than at the origin
+        } catch {
+          return json({ error: "body must be JSON" }, 400);
+        }
       }
       body = raw;
     }
@@ -87,7 +108,9 @@ export default {
       const response = await fetch(upstream, {
         method: request.method,
         headers: {
-          "content-type": "application/json",
+          // Forwarded whole, not rebuilt: a multipart content-type carries the
+          // boundary, and dropping it makes the body unparseable at the origin.
+          "content-type": isMultipart ? contentType : "application/json",
           // Proves the request came through this Worker. Without it the origin
           // refuses, so discovering the tunnel hostname is not enough.
           "x-tlakit-key": env.ORIGIN_KEY,

@@ -15,10 +15,13 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from . import statewriter
+from .graph import GraphBuilder, StateGraph, parse_ndjson
 from .jar import find_community_jar, find_tools_jar
 from .parse import parse_loop_start, parse_sany, parse_tlc
 from .result import CheckResult, Diagnostic, Outcome, RawOutput, Severity, Stats
@@ -26,6 +29,10 @@ from .source import declared_variables, strip_comments
 from .trace import TlaValueError, load_trace, parse_text_trace, parse_tla_value
 
 TRACE_FILE = "trace.json"
+#: Where the `IStateWriter` streams the state graph. The default path.
+GRAPH_NDJSON_FILE = "graph.ndjson"
+#: Where `-dump dot` writes it instead, on a machine with no JDK to compile
+#: the writer with.
 GRAPH_FILE = "graph.dot"
 
 # A PlusCal source names its own translator with `--algorithm Name` or
@@ -279,6 +286,82 @@ def terminate_all() -> int:
     return len(procs)
 
 
+class _GraphTail:
+    """Build the state graph from the NDJSON file while TLC is still writing it.
+
+    The writer flushes a record at a time, so the graph can be assembled as it
+    is generated rather than after the run -- which is the point: a check killed
+    on a budget still leaves every state it reached, and a graph too large to
+    want is never held past `max_nodes`.
+
+    Reading a file another process is appending to is the one part of this that
+    can fail on its own (a Windows share mode, say). It is not worth failing a
+    check over, so a reader that dies is recorded and `graph` falls back to
+    reading the finished file -- the same records, just not early.
+    """
+
+    #: How long to wait before looking for more records.
+    POLL_SECONDS = 0.05
+
+    def __init__(self, path: Path, max_nodes: int | None = None) -> None:
+        self._path = path
+        self._max_nodes = max_nodes
+        self._builder = GraphBuilder(max_nodes)
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        #: Why tailing stopped early, if it did.
+        self.error: OSError | None = None
+
+    def start(self) -> None:
+        # The reader has to be able to open the file before the JVM creates
+        # it. An empty file is also what the writer truncates on open, so
+        # creating it here costs the reader nothing.
+        self._path.touch()
+        self._thread = threading.Thread(
+            target=self._tail, name="tlakit-graph", daemon=True
+        )
+        self._thread.start()
+
+    def _tail(self) -> None:
+        try:
+            with open(self._path, "rb") as handle:
+                pending = b""
+                while True:
+                    chunk = handle.read()
+                    if chunk:
+                        # Bytes, not text: a read can land in the middle of a
+                        # multi-byte character, and decoding per line rather
+                        # than per read keeps that character whole.
+                        pending += chunk
+                        *lines, pending = pending.split(b"\n")
+                        for line in lines:
+                            self._builder.feed(line.decode("utf-8", "replace"))
+                    elif self._stop.is_set():
+                        return
+                    else:
+                        time.sleep(self.POLL_SECONDS)
+        except OSError as exc:
+            self.error = exc
+
+    def stop(self) -> None:
+        """Stop tailing, after one last read of whatever TLC left behind."""
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=10)
+            self._thread = None
+
+    def graph(self) -> StateGraph:
+        if self.error is None:
+            return self._builder.graph()
+        try:
+            text = self._path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            # Nothing was readable at any point. An empty graph is the honest
+            # answer, and `raw` records the argv that produced it.
+            return self._builder.graph()
+        return parse_ndjson(text, self._max_nodes)
+
+
 def _terminate(proc: subprocess.Popen) -> tuple[str, str]:
     """Kill a tool process and everything it spawned, then drain its pipes."""
     _kill_group(proc)
@@ -313,6 +396,19 @@ class CliRunner:
         if self.community_jar is not None:
             parts.append(str(self.community_jar))
         return os.pathsep.join(parts)
+
+    def _state_writer(self) -> Path | None:
+        """The compiled IStateWriter, or None to fall back to `-dump dot`.
+
+        A missing JDK is the ordinary reason for None, and not a failure: the
+        graph still arrives, from TLC's own dump. Compiling happens once per
+        jar and is cached, so this is a directory lookup on every run after the
+        first.
+        """
+        try:
+            return statewriter.class_directory(self.tools_jar)
+        except statewriter.StateWriterUnavailable:
+            return None
 
     def _run(
         self, argv: list[str], cwd: Path, timeout: float | None
@@ -407,13 +503,24 @@ class CliRunner:
         translated = (work / f"{module}.tla").read_text(encoding="utf-8")
         return translated, None
 
-    def parse(self, source: str, module: str, timeout: float | None = None) -> CheckResult:
+    def parse(
+        self,
+        source: str,
+        module: str,
+        timeout: float | None = None,
+        heap: str | None = None,
+    ) -> CheckResult:
         """Syntax- and level-check a module with SANY.
 
         A PlusCal algorithm block is translated first -- SANY has no idea
         what one is and reports a syntax error that never mentions PlusCal.
         `timeout` bounds that translation step; SANY itself remains untimed,
         as before.
+
+        `heap` caps the JVM, as it does for `check`. Left unset a JVM takes a
+        quarter of physical RAM as its maximum, which is fine for a developer
+        parsing their own module and not fine for a public endpoint parsing
+        anyone's -- `serve` passes its own limit.
         """
         with tempfile.TemporaryDirectory(prefix="tlakit-") as tmp:
             work = Path(tmp)
@@ -422,6 +529,7 @@ class CliRunner:
                 return failure
             argv = [
                 _java(),
+                *([f"-Xmx{heap}"] if heap else []),
                 "-cp",
                 self._classpath(),
                 "tla2sany.SANY",
@@ -491,13 +599,29 @@ class CliRunner:
             (work / f"{module}.cfg").write_text(config, encoding="utf-8")
             for name, text in (extra_modules or {}).items():
                 (work / f"{name}.tla").write_text(text, encoding="utf-8")
+            # With a JDK present the graph is streamed from tlakit's own
+            # IStateWriter, so it is built while TLC runs and survives a kill.
+            # Without one, TLC's `-dump dot` produces the same graph after the
+            # fact and `parse_dot` reads it.
+            writer_dir = self._state_writer() if graph else None
+            streaming = writer_dir is not None
+            classpath = self._classpath()
+            if streaming:
+                classpath += os.pathsep + str(writer_dir)
             argv = [
                 _java(),
                 # JVM options must precede -cp.
                 *([f"-Xmx{heap}"] if heap else []),
+                *(
+                    [f"-D{statewriter.OUT_PROPERTY}={GRAPH_NDJSON_FILE}"]
+                    if streaming
+                    else []
+                ),
                 "-cp",
-                self._classpath(),
-                "tlc2.TLC",
+                classpath,
+                # The writer's own main: handleParameters, setStateWriter,
+                # process -- TLC doing the checking either way.
+                statewriter.MAIN_CLASS if streaming else "tlc2.TLC",
                 "-config",
                 f"{module}.cfg",
                 "-dumpTrace",
@@ -505,11 +629,24 @@ class CliRunner:
                 TRACE_FILE,
                 # actionlabels puts the action on each edge, which is the whole
                 # point of showing the graph rather than a bag of states.
-                *(["-dump", "dot,actionlabels", GRAPH_FILE] if graph else []),
+                *(
+                    ["-dump", "dot,actionlabels", GRAPH_FILE]
+                    if graph and not streaming
+                    else []
+                ),
                 *(extra_opts or []),
                 f"{module}.tla",
             ]
-            raw, timed_out = self._run(argv, work, timeout)
+            tail = _GraphTail(work / GRAPH_NDJSON_FILE, max_graph_nodes) if streaming else None
+            if tail is not None:
+                tail.start()
+            try:
+                raw, timed_out = self._run(argv, work, timeout)
+            finally:
+                # Before the working directory goes away, and on the way out of
+                # an interrupted cell too: the thread holds the file open.
+                if tail is not None:
+                    tail.stop()
             names = declared if declared is not None else declared_variables(source)
             trace = load_trace(work / TRACE_FILE, names)
             if trace is None:
@@ -519,7 +656,9 @@ class CliRunner:
                 # trace, when present, is just as good a source.
                 trace = parse_text_trace(raw.stdout, names)
             state_graph = None
-            if graph:
+            if tail is not None:
+                state_graph = tail.graph()
+            elif graph:
                 dot = work / GRAPH_FILE
                 if dot.is_file():
                     from .graph import parse_dot

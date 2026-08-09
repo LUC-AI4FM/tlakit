@@ -18,6 +18,17 @@ notebook magics — which have no docstring to be generated from — see
         - use_local
         - module_name_of
         - tla_value
+        - Raw
+
+## Command line
+
+The `tlakit` console script. Its exit codes are a contract — see the module
+docstring for why `1` and `2` are separate.
+
+::: tlakit.cli_main
+    options:
+      members:
+        - main
 
 ## Results
 
@@ -35,6 +46,27 @@ notebook magics — which have no docstring to be generated from — see
         - RawOutput
         - flatten_state
 
+## State graph
+
+::: tlakit.graph
+    options:
+      members:
+        - StateGraph
+        - Node
+        - Edge
+        - GraphBuilder
+        - parse_ndjson
+        - parse_dot
+        - parse_state_label
+        - path_through
+
+::: tlakit.statewriter
+    options:
+      members:
+        - class_directory
+        - javac_executable
+        - StateWriterUnavailable
+
 ## Runners
 
 ::: tlakit.cli
@@ -51,6 +83,26 @@ notebook magics — which have no docstring to be generated from — see
         - RemoteRunner
         - RemoteError
         - Unsupported
+
+::: tlakit.mcp.runner
+    options:
+      members:
+        - McpRunner
+        - McpUnavailable
+
+## The MCP server
+
+::: tlakit.mcp.serve
+    options:
+      members:
+        - McpServer
+        - McpServeError
+        - find_extension
+        - prepare
+        - build
+        - stage
+        - clone
+        - is_stale
 
 ## Locating the toolchain
 
@@ -103,6 +155,18 @@ notebook magics — which have no docstring to be generated from — see
         - trace_from_itf
         - itf_value
         - ApalacheNotFound
+
+## TLAPS: the proof system
+
+::: tlakit.tlaps
+    options:
+      members:
+        - TlapsRunner
+        - ProofResult
+        - Obligation
+        - parse_obligations
+        - find_tlapm
+        - TlapmNotFound
 
 ## Stepping under the TLA+ Debugger
 

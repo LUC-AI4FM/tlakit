@@ -108,24 +108,79 @@ def test_tla_eval_raises_with_diagnostic_detail_on_failure(ip, monkeypatch):
         ip.run_line_magic("tla_eval", "nope")
 
 
-def test_tla_cell_skips_parsing_when_the_runner_has_no_parser(ip, monkeypatch):
-    """The browser path: `%%tla` must define the module, not raise.
+def test_tla_cell_parses_through_the_service(ip, monkeypatch):
+    """The browser path since #67: there is no local SANY, so `%%tla` asks the
+    service and shows a real answer instead of "stored, not yet parsed"."""
+    import json as _json
 
-    The remote service exposes checking only, so a magic that parses for speed
-    has to fall back rather than turn every spec cell into a traceback -- which
-    is what the published browser notebook did.
+    from tlakit import api
+    from tlakit.remote import RemoteRunner
+    from tlakit.result import Outcome
+
+    def transport(method, url, payload, timeout):
+        assert url.endswith("/parse"), url
+        assert _json.loads(payload) == {"spec": WIDGET}
+        return 200, _json.dumps({"outcome": "ok", "ok": True})
+
+    monkeypatch.setattr(api, "_override", RemoteRunner(transport=transport))
+    result = ip.run_cell_magic("tla", "Widget", WIDGET)
+
+    assert result.outcome is Outcome.OK
+    assert MODULES["Widget"] == WIDGET
+
+
+def test_tla_cell_still_defines_the_module_when_the_service_is_unreachable(
+    ip, monkeypatch
+):
+    """A module cell must not become a traceback because the network did.
+
+    Before #67 the remote runner simply could not parse, so this could not
+    happen. Now that `%%tla` makes a round trip, an outage, a 503 or a rate
+    limit would otherwise take the cell down with it -- and storing the module
+    is the part `%%tlc` depends on.
     """
     from tlakit import api
     from tlakit.magics import ModuleDefined
     from tlakit.remote import RemoteRunner
 
-    monkeypatch.setattr(api, "_override", RemoteRunner())
+    def dead(method, url, payload, timeout):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(api, "_override", RemoteRunner(transport=dead))
     result = ip.run_cell_magic("tla", "Widget", WIDGET)
 
     assert isinstance(result, ModuleDefined)
     assert result.name == "Widget"
     assert result.variables == ["x"]
     assert MODULES["Widget"] == WIDGET
+
+
+def test_tla_cell_shows_a_parse_error_rather_than_swallowing_it(ip, monkeypatch):
+    """The fallback above must not hide the answer the reader asked for."""
+    import json as _json
+
+    from tlakit import api
+    from tlakit.magics import ModuleDefined
+    from tlakit.remote import RemoteRunner
+    from tlakit.result import Outcome
+
+    def transport(method, url, payload, timeout):
+        return 200, _json.dumps(
+            {
+                "outcome": "parse_error",
+                "ok": False,
+                "diagnostics": [
+                    {"severity": "error", "message": "boom", "line": 2}
+                ],
+            }
+        )
+
+    monkeypatch.setattr(api, "_override", RemoteRunner(transport=transport))
+    result = ip.run_cell_magic("tla", "Widget", WIDGET)
+
+    assert not isinstance(result, ModuleDefined)
+    assert result.outcome is Outcome.PARSE_ERROR
+    assert result.diagnostics[0].line == 2
 
 
 def test_no_parse_still_reports_the_module(ip):

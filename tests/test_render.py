@@ -371,3 +371,59 @@ def test_check_result_str_unused_actions():
     )
     s = str(r)
     assert "warning: Never enabled: Next. An action that never fires" in s
+
+
+def _unwrap(block: str) -> str:
+    """Undo the hanging indent: drop the label, rejoin the folded lines."""
+    lines = [line.strip() for line in block.splitlines()]
+    return " ".join([lines[0].split(": ", 1)[1], *lines[1:]])
+
+
+def test_printed_prose_stays_inside_a_terminal():
+    """The whole point of __str__ is that nothing runs off the right edge.
+    A prose paragraph left unwrapped reproduces the bug in a new place."""
+    from tlakit.result import Coverage
+    r = CheckResult(
+        Outcome.DEADLOCK,
+        [Diagnostic(Severity.ERROR, "Deadlock reached at state 4")],
+        None,
+        Stats(
+            distinct=17,
+            depth=4,
+            coverage={n: Coverage(n, 0, 0) for n in ("Alpha", "Beta", "Gamma")},
+        ),
+        RAW,
+    )
+    for line in str(r).splitlines():
+        assert len(line) <= 79, f"{len(line)} chars: {line!r}"
+
+
+def test_both_renderers_say_the_deadlock_hint_from_one_source():
+    """Text and HTML render the same paragraph. Re-typing it in either place
+    is how the two views drift apart, so assert they still match."""
+    from tlakit.render import _DEADLOCK_HINT
+
+    r = CheckResult(Outcome.DEADLOCK, [], None, Stats(), RAW)
+    note = next(b for b in str(r).split("\n\n") if b.lstrip().startswith("Note:"))
+    assert _unwrap(note) == _DEADLOCK_HINT
+
+    html = result_html(r)
+    assert "<code>CHECK_DEADLOCK FALSE</code>" in html
+    assert "<code>check_deadlock=False</code>" in html
+
+
+def test_wrapped_prose_hangs_under_its_own_label():
+    long_message = " ".join(["a really rather wordy diagnostic"] * 6)
+    r = CheckResult(
+        Outcome.INVARIANT_VIOLATION,
+        [Diagnostic(Severity.ERROR, long_message)],
+        None,
+        Stats(),
+        RAW,
+    )
+    lines = [line for line in str(r).splitlines() if line.strip()][1:]
+    assert lines[0].startswith("  error: ")
+    assert len(lines) > 1, "the message was long enough that it should fold"
+    for continuation in lines[1:]:
+        assert continuation.startswith(" " * len("  error: "))
+        assert continuation[len("  error: ")] != " "

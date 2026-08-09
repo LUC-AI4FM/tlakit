@@ -49,6 +49,40 @@ def test_tla_eval_requires_an_expression(ip):
         ip.run_line_magic("tla_eval", "")
 
 
+def test_tlc_unknown_flag_raises(ip):
+    with pytest.raises(TlaMagicError, match=r"--timeout"):
+        ip.run_cell_magic("tlc", "Widget --timeuot=30", "SPECIFICATION Spec\n")
+
+
+def test_tlc_bad_timeout_value_raises(ip):
+    with pytest.raises(TlaMagicError, match=r"timeout"):
+        ip.run_cell_magic("tlc", "Widget --timeout=soon", "SPECIFICATION Spec\n")
+
+
+def test_tla_unknown_flag_raises(ip):
+    with pytest.raises(TlaMagicError, match="no-parse"):
+        ip.run_cell_magic("tla", "Widget --noparse", WIDGET)
+
+
+def test_tlc_separated_timeout_behaves_like_equals(ip, monkeypatch):
+    # Both spellings must reach Spec.check with the same parsed float.
+    timeout_calls = []
+
+    class _FakeSpec:
+        def __init__(self, source, name):
+            pass
+
+        def check(self, config, timeout=None):
+            timeout_calls.append(timeout)
+            return "ok"
+
+    monkeypatch.setattr("tlakit.magics.Spec", _FakeSpec)
+    ip.run_cell_magic("tla", "Widget --no-parse", WIDGET)
+    assert ip.run_cell_magic("tlc", "Widget --timeout 30", "SPECIFICATION Spec\n") == "ok"
+    assert ip.run_cell_magic("tlc", "Widget --timeout=30", "SPECIFICATION Spec\n") == "ok"
+    assert timeout_calls == [30.0, 30.0]
+
+
 # --- issue #17: %tla_eval via tlc2.REPL -------------------------------------
 # No jar needed: CliRunner.eval() is faked at the point magics.py calls it,
 # so what's under test is the magic's wiring (usage errors, value passthrough,

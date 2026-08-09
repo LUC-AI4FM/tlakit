@@ -1,6 +1,7 @@
 """IPython magics: %%tla, %%tlc, %tla_eval."""
 from __future__ import annotations
 
+import argparse
 import shlex
 from dataclasses import dataclass
 
@@ -15,6 +16,35 @@ MODULES: dict[str, str] = {}
 
 class TlaMagicError(RuntimeError):
     """Raised for usage errors in a magic, for example an unknown module."""
+
+
+def _parse_flags(line: str, spec: dict[str, dict[str, object]]) -> tuple[argparse.Namespace, list[str]]:
+    """Parse one magic's flags line into (flags, positional names).
+
+    Despite the name, *positionals* that start with ``-`` are exactly the
+    misspelled flags the magics used to swallow silently — they raise
+    :class:`TlaMagicError` listing what the magic accepts instead. The two
+    spellings ``--flag=value`` and ``--flag value`` behave the same.
+
+    ``allow_abbrev=False`` keeps a typo like ``--timeo=30`` from silently
+    matching ``--timeout``, and ``exit_on_error=False`` turns argparse's
+    ``sys.exit`` into a :class:`TlaMagicError` we can let the kernel display
+    as a usage message.
+    """
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False, exit_on_error=False)
+    for flag, kwargs in spec.items():
+        parser.add_argument(flag, **kwargs)
+    try:
+        namespace, extras = parser.parse_known_args(shlex.split(line))
+    except argparse.ArgumentError as exc:
+        raise TlaMagicError(str(exc)) from exc
+    unknown_flags = [extra for extra in extras if extra.startswith("-")]
+    if unknown_flags:
+        accepted = ", ".join(spec)
+        raise TlaMagicError(
+            f"Unknown magic flag(s): {', '.join(unknown_flags)}. Accepted flags: {accepted}."
+        )
+    return namespace, [extra for extra in extras if not extra.startswith("-")]
 
 
 @dataclass(frozen=True)
@@ -38,10 +68,6 @@ class ModuleDefined:
         from .render import module_defined_html  # lazy: render imports result
 
         return module_defined_html(self)
-
-
-def _positional(args: list[str]) -> list[str]:
-    return [a for a in args if not a.startswith("--")]
 
 
 @magics_class
@@ -69,13 +95,12 @@ class TlaMagics(Magics):
         A parse *error* is not caught here. That is an answer about the spec,
         and it is the answer the reader asked for.
         """
-        args = shlex.split(line)
-        names = _positional(args)
+        flags, names = _parse_flags(line, {"--no-parse": {"action": "store_true"}})
         name = names[0] if names else module_name_of(cell)
         MODULES[name] = cell
         spec = Spec(source=cell, name=name)
         defined = ModuleDefined(name=name, variables=declared_variables(cell))
-        if "--no-parse" in args or not spec.can_parse:
+        if flags.no_parse or not spec.can_parse:
             return defined
         try:
             return spec.parse()
@@ -90,10 +115,9 @@ class TlaMagics(Magics):
     def tlc(self, line: str, cell: str):
         """Model-check a module defined earlier; the cell body is the .cfg.
 
-        Usage: `%%tlc ModuleName [--timeout=SECONDS]`.
+        Usage: `%%tlc ModuleName [--timeout=SECONDS | --timeout SECONDS]`.
         """
-        args = shlex.split(line)
-        names = _positional(args)
+        flags, names = _parse_flags(line, {"--timeout": {"type": float}})
         if not names:
             raise TlaMagicError("Usage: %%tlc ModuleName")
         name = names[0]
@@ -103,12 +127,8 @@ class TlaMagics(Magics):
                 f"No module named {name!r} in this session. Define it with "
                 f"`%%tla {name}` first. Known modules: {known}."
             )
-        timeout = None
-        for arg in args:
-            if arg.startswith("--timeout="):
-                timeout = float(arg.split("=", 1)[1])
         return Spec(source=MODULES[name], name=name).check(
-            config=cell, timeout=timeout
+            config=cell, timeout=flags.timeout
         )
 
     @line_magic

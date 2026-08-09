@@ -1,10 +1,19 @@
 name: release
 
-# Tag-driven. `v0.1.0` publishes version 0.1.0 -- and the build refuses if the
-# tag and pyproject disagree, so a mistagged release fails before anything is
-# uploaded rather than shipping the wrong version under the right name.
+# Two streams, one pipeline, so a dev build is verified exactly as hard as a
+# release is.
+#
+#   tag `v0.1.0`  -> version 0.1.0 -> PyPI, then a GitHub Release. The build
+#                    refuses if the tag and pyproject disagree, so a mistagged
+#                    release fails before anything is uploaded rather than
+#                    shipping the wrong version under the right name.
+#   push to main  -> version <last tag, patch bumped>.dev<commit count>
+#                    -> TestPyPI. Nothing is committed back to the branch; the
+#                    version is computed at build time and written into the
+#                    checkout only.
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
@@ -32,6 +41,9 @@ jobs:
           # Nothing here pushes, and a lingering credential in the runner is
           # exactly what a malicious dependency would look for.
           persist-credentials: false
+          # The dev version counts commits and reads the last tag, and neither
+          # exists in the default shallow, tagless checkout.
+          fetch-depth: 0
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -40,26 +52,23 @@ jobs:
       - name: Install build tooling
         run: python -m pip install --upgrade build twine
 
-      - name: Build sdist and wheel
-        run: python -m build
-
-      - name: Tag must match the packaged version
+      - name: Settle the version to build
+        # Runs *before* the build, because it may rewrite the version the build
+        # reads. On a tag this only checks; on main it also writes.
         id: version
         run: |
           set -euo pipefail
-          version=$(python -c "
-          import tomllib, pathlib
-          print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])
-          ")
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            python tools/version.py --check "${GITHUB_REF_NAME#v}"
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version=$(python tools/version.py --write-dev)
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "packaged version: $version"
-          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
-            tag="${GITHUB_REF_NAME#v}"
-            if [ "$tag" != "$version" ]; then
-              echo "::error::tag v$tag does not match pyproject version $version"
-              exit 1
-            fi
-          fi
+
+      - name: Build sdist and wheel
+        run: python -m build
 
       - name: Metadata must render on PyPI
         # PyPI rejects a bad long_description *after* upload begins, which
@@ -136,7 +145,10 @@ jobs:
 
   publish:
     needs: [build, attest]
-    if: github.event_name == 'push' || inputs.publish
+    # Tags only. `github.event_name == 'push'` used to be enough, because a tag
+    # was the only push this workflow answered to; now that main pushes run it
+    # too, that condition would publish every commit to real PyPI.
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
     runs-on: ubuntu-latest
     # A GitHub environment with a required reviewer, so publishing to PyPI is a
     # deliberate human click and not a consequence of pushing a tag.
@@ -156,9 +168,38 @@ jobs:
         with:
           attestations: true
 
+  publish-dev:
+    # The other half of the fork: every commit on main goes to TestPyPI, so a
+    # fix is installable the moment it merges without spending a real version
+    # number on it.
+    needs: [build, attest]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # A separate environment from `pypi`, and deliberately without a required
+    # reviewer -- a dev build nobody approves is the entire point. Keeping it
+    # separate is also what stops a main push from borrowing PyPI's trust.
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/tlakit
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          attestations: true
+          # Re-running a workflow rebuilds the same commit, so the same dev
+          # version. TestPyPI rejects that upload, and a red run for a build
+          # that already succeeded is noise.
+          skip-existing: true
+
   github-release:
     needs: [build, publish]
-    if: github.event_name == 'push'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write

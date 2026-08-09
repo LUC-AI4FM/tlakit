@@ -1,12 +1,16 @@
 """Locate the TLA+ tool jars.
 
 Resolution order: explicit path -> environment variable -> platformdirs cache.
-Downloading a pinned release is deliberately left to M2; until then a missing
-jar is a clear, actionable error rather than a silent fetch.
+
+Within the cache, the newest version directory wins. That is a comparison of
+version *numbers*, not of strings: sorting the names lexically puts `v1.9.0`
+above `v1.10.0`, which would pin a user to an older toolchain every time the
+minor version reached double digits (#91).
 """
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 TOOLS_JAR = "tla2tools.jar"
@@ -36,6 +40,21 @@ def cache_dir() -> Path:
     return Path(platformdirs.user_cache_dir("tlakit"))
 
 
+def _version_key(path: Path) -> tuple[int, ...]:
+    """Parse a version directory tag into a tuple of ints for version-based sorting.
+
+    Handles 'v1.10.0', 'v1.9.0', '202607311834', etc.
+    Unparseable tags return (-1,) so they sort last.
+    """
+    tag = path.parent.name
+    parts = re.findall(r"\d+", tag)
+    if not parts:
+        return (-1,)
+    # No try/except around int(): `\d+` only ever yields digits, and Python
+    # integers do not overflow, so there is nothing here that can raise.
+    return tuple(int(p) for p in parts)
+
+
 def _candidates(explicit: Path | None, env_var: str, filename: str) -> list[Path]:
     found: list[Path] = []
     if explicit is not None:
@@ -47,8 +66,13 @@ def _candidates(explicit: Path | None, env_var: str, filename: str) -> list[Path
     # an older one; newest tag wins when several are present.
     root = cache_dir()
     if root.is_dir():
-        found.extend(sorted(root.glob(f"*/{filename}"), reverse=True))
-    found.append(root / filename)
+        globbed = sorted(root.glob(f"*/{filename}"), key=_version_key, reverse=True)
+        for p in globbed:
+            if p not in found:
+                found.append(p)
+    legacy = root / filename
+    if legacy not in found:
+        found.append(legacy)
     return found
 
 

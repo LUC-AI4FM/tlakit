@@ -69,3 +69,43 @@ print("ok")
     )
     assert result.returncode == 0, result.stderr
     assert "ok" in result.stdout
+
+
+def test_version_sorting_prefers_v1_10_over_v1_9(tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+    v1_9 = cache / "v1.9.0" / "tla2tools.jar"
+    v1_10 = cache / "v1.10.0" / "tla2tools.jar"
+    v1_9.parent.mkdir(parents=True)
+    v1_10.parent.mkdir(parents=True)
+    v1_9.write_bytes(b"v1.9")
+    v1_10.write_bytes(b"v1.10")
+
+    monkeypatch.delenv("TLAKIT_TLA2TOOLS", raising=False)
+    monkeypatch.setattr(jar, "cache_dir", lambda: cache)
+    assert jar.find_tools_jar() == v1_10
+
+
+def test_unparseable_cache_dir_sorts_last(tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+    backup = cache / "backup" / "tla2tools.jar"
+    v1_9 = cache / "v1.9.0" / "tla2tools.jar"
+    backup.parent.mkdir(parents=True)
+    v1_9.parent.mkdir(parents=True)
+    backup.write_bytes(b"backup")
+    v1_9.write_bytes(b"v1.9")
+
+    monkeypatch.delenv("TLAKIT_TLA2TOOLS", raising=False)
+    monkeypatch.setattr(jar, "cache_dir", lambda: cache)
+    assert jar.find_tools_jar() == v1_9
+
+
+def test_version_key_parsing():
+    from pathlib import Path
+
+    assert jar._version_key(Path("cache/v1.10.0/tla2tools.jar")) == (1, 10, 0)
+    assert jar._version_key(Path("cache/v1.9.0/tla2tools.jar")) == (1, 9, 0)
+    assert jar._version_key(Path("cache/202607311834/CommunityModules-deps.jar")) == (
+        202607311834,
+    )
+    assert jar._version_key(Path("cache/backup/tla2tools.jar")) == (-1,)
+

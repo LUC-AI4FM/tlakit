@@ -103,6 +103,16 @@ and a CI job can still tell a real failure from a typo in a path.
 *finish* has no successor state at the end, and TLC reports that as
 `DEADLOCK` — correctly, since it cannot know termination was intended.
 
+## Or from curl directly
+
+If you want to check a specification from a machine where `tlakit` (or Python) is not installed, you can upload the files directly to the public web runner using `multipart/form-data`:
+
+```bash
+curl -s -F spec=@Counter.tla -F cfg=@Counter.cfg https://tla-runner.ericspencer.us/check
+```
+
+However, if you have `tlakit` installed, you do not need `curl` at all: the `tlakit check` command handles this natively (see above).
+
 ## Related work
 
 tlakit is the next evolution of Läufer and Thiruvathukal's *TLA+ for All: Model

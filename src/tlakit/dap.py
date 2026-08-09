@@ -443,7 +443,21 @@ class DebugSession:
         self._client.request("launch")
         # TLC suspends before the first ASSUME. That stop is not a state, so
         # clear it before the caller's first `step()`.
-        self._client.wait_for_event("stopped", timeout=timeout)
+        #
+        # `wait_for_event` returns None rather than raising, and dropping that
+        # None is worse than useless: the stop stays queued, so the caller's
+        # first `step()` consumes it as though `continue` had produced it and
+        # reports success while TLC has not moved. Everything after reads one
+        # stop ahead of the debugger, and the first visible symptom is an
+        # evaluation in a frame from before the spec's variables exist -- an
+        # "undefined identifier" a long way from its cause. Fail here instead.
+        if self._client.wait_for_event("stopped", timeout=timeout) is None:
+            self.close()
+            raise DebuggerTimeout(
+                f"the debugger did not suspend before the first ASSUME within "
+                f"{timeout}s, so nothing after this could be read in step with "
+                f"TLC. Pass a larger startup_timeout= if the machine is slow."
+            )
 
     # -- stepping
 

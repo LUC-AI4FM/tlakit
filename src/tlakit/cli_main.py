@@ -29,7 +29,9 @@ import argparse
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .api import Raw, Spec, load
+from .jar import find_tools_jar
 from .result import Outcome
 
 #: See the module docstring; these are a public contract.
@@ -61,6 +63,12 @@ def _constant(text: str) -> tuple[str, Any]:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    try:
+        tools_jar = find_tools_jar()
+        version_str = f"tlakit {__version__} (using {tools_jar})"
+    except Exception:
+        version_str = f"tlakit {__version__}"
+
     parser = argparse.ArgumentParser(
         prog="tlakit",
         description="Check TLA+ specifications from the command line.",
@@ -68,6 +76,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "Exit codes: 0 the spec checked out, 1 it did not, "
             "2 the check could not run."
         ),
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=version_str,
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

@@ -18,7 +18,14 @@ from pathlib import Path
 
 import pytest
 
-from tlakit.cli_main import CANNOT_RUN, FOUND_A_PROBLEM, OK, main
+from tlakit.cli_main import (
+    BOUNDED,
+    CANNOT_RUN,
+    EXIT_CODES,
+    FOUND_A_PROBLEM,
+    OK,
+    main,
+)
 from tlakit.result import CheckResult, Outcome, RawOutput, Severity, Diagnostic, Stats
 
 COUNTER = """---- MODULE Counter ----
@@ -137,8 +144,64 @@ def test_a_runner_that_cannot_start_exits_two(counter, capsys):
     assert "no java" in out
 
 
-def test_the_three_codes_are_distinct():
-    assert len({OK, FOUND_A_PROBLEM, CANNOT_RUN}) == 3
+def test_the_four_codes_are_distinct():
+    assert len({OK, FOUND_A_PROBLEM, CANNOT_RUN, BOUNDED}) == 4
+
+
+def test_every_outcome_has_a_deliberate_exit_code():
+    """The real fix for #83: adding an `Outcome` must force a decision here.
+
+    There have been several new outcomes, and the old `is OK` test swept each
+    one into "something is wrong with your spec" without anyone choosing that.
+    A mapping that must be exhaustive is what stops the next one.
+    """
+    missing = [member.name for member in Outcome if member not in EXIT_CODES]
+    assert not missing, (
+        f"{missing} have no exit code. Add them to cli_main.EXIT_CODES and say "
+        "in the module docstring why each one lands where it does."
+    )
+    assert set(EXIT_CODES) <= set(Outcome)
+    assert set(EXIT_CODES.values()) <= {OK, FOUND_A_PROBLEM, CANNOT_RUN, BOUNDED}
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [Outcome.ERROR, Outcome.TIMEOUT, Outcome.STATE_SPACE_TOO_LARGE],
+)
+def test_a_run_that_never_finished_exits_two_not_one(counter, capsys, outcome):
+    """None of these is a fact about the spec (#83).
+
+    A JVM that died, a timeout tlakit itself imposed and a state space too big
+    to hold all say the same thing: the search did not finish. Reporting them
+    as 1 tells a CI job the spec is broken, and raising `--timeout` until the
+    failure goes away teaches nothing.
+    """
+    code, out = run(["check", str(counter)], FakeRunner(outcome), capsys)
+    assert code == CANNOT_RUN == 2
+    assert outcome.name in out
+
+
+def test_a_bounded_check_is_neither_zero_nor_one(counter, capsys):
+    """`BOUNDED_OK` is Apalache finding nothing *within its bound*.
+
+    That is not a found problem, so 1 is wrong; and `Outcome`'s own comment
+    says at length that it is not `OK` either, so 0 would put the same
+    falsehood in the exit status that the enum refuses to put in the field.
+    """
+    code, out = run(["check", str(counter)], FakeRunner(Outcome.BOUNDED_OK), capsys)
+    assert code == BOUNDED == 3
+    assert code not in (OK, FOUND_A_PROBLEM)
+    assert "BOUNDED_OK" in out
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [Outcome.EVALUATION_ERROR, Outcome.PARSE_ERROR, Outcome.CONFIG_ERROR],
+)
+def test_errors_in_the_spec_or_its_config_stay_at_one(counter, capsys, outcome):
+    """These three *are* claims about what was handed to TLC."""
+    code, _ = run(["check", str(counter)], FakeRunner(outcome), capsys)
+    assert code == FOUND_A_PROBLEM
 
 
 # --- finding the config ---------------------------------------------------

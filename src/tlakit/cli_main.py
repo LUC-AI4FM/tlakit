@@ -16,12 +16,39 @@ depends on it and it cannot be changed later without breaking them in silence:
     0  the spec checked out
     1  the run succeeded and found something wrong with the spec
     2  the run did not happen
+    3  the run finished within a bound and found nothing wrong there
 
 1 and 2 are separated for the reason `grep` separates them. A violated
 invariant is a *successful* run -- TLC did its job -- but `tlakit check
 Spec.tla && deploy` must not deploy, and the shell has only one word for the
 difference. Meanwhile a typo in a filename is not a fact about anyone's spec,
 and a CI job that cannot tell the two apart will report the wrong failure.
+
+Which outcome lands where is `EXIT_CODES`, and every member of `Outcome` is in
+it on purpose:
+
+- `OK` is 0, and is the only thing that is.
+- `INVARIANT_VIOLATION`, `DEADLOCK`, `TEMPORAL_VIOLATION`,
+  `ASSUMPTION_VIOLATION`, `ASSERTION_FAILED`, `EVALUATION_ERROR`,
+  `PARSE_ERROR` and `CONFIG_ERROR` are 1. Each is a fact about the spec or the
+  config it was given -- a run that produced an answer, and the answer is no.
+- `ERROR`, `TIMEOUT` and `STATE_SPACE_TOO_LARGE` are 2. None is a claim about
+  anyone's spec: a JVM that could not start, a timeout tlakit itself imposed,
+  and a state space too large to finish all say only that the search did not
+  complete. Reporting them as 1 sends a CI job hunting for a bug that has not
+  been shown to exist -- and raising `--timeout` until the failure disappears
+  teaches nothing about the spec.
+- `BOUNDED_OK` is 3, and gets its own code because neither of the others is
+  true. Apalache found no counterexample *within the bound it was given*,
+  which is not a found problem (1) and, as `Outcome.BOUNDED_OK`'s own comment
+  argues, is not `OK` (0) either; collapsing it into 0 would put in the exit
+  status exactly the falsehood the enum refuses to put in the field. 3 is
+  non-zero, so `&& deploy` still does not deploy on a weaker claim than the
+  one the caller asked for.
+
+`EXIT_CODES` is exhaustive over `Outcome`, and a test fails if a new member is
+added without a code chosen for it. That is the point of the mapping; the
+numbers are the easy part.
 """
 from __future__ import annotations
 
@@ -38,6 +65,27 @@ from .result import Outcome
 OK = 0
 FOUND_A_PROBLEM = 1
 CANNOT_RUN = 2
+BOUNDED = 3
+
+#: Every `Outcome`, and the code it was deliberately given. Exhaustive on
+#: purpose: `_exit_code` raises on a member that is missing rather than
+#: guessing, and a test in `tests/test_cli_main.py` fails first so nobody has
+#: to hit that at a shell. Reasoning for each group is in the module docstring.
+EXIT_CODES: dict[Outcome, int] = {
+    Outcome.OK: OK,
+    Outcome.INVARIANT_VIOLATION: FOUND_A_PROBLEM,
+    Outcome.DEADLOCK: FOUND_A_PROBLEM,
+    Outcome.TEMPORAL_VIOLATION: FOUND_A_PROBLEM,
+    Outcome.ASSUMPTION_VIOLATION: FOUND_A_PROBLEM,
+    Outcome.ASSERTION_FAILED: FOUND_A_PROBLEM,
+    Outcome.EVALUATION_ERROR: FOUND_A_PROBLEM,
+    Outcome.PARSE_ERROR: FOUND_A_PROBLEM,
+    Outcome.CONFIG_ERROR: FOUND_A_PROBLEM,
+    Outcome.ERROR: CANNOT_RUN,
+    Outcome.TIMEOUT: CANNOT_RUN,
+    Outcome.STATE_SPACE_TOO_LARGE: CANNOT_RUN,
+    Outcome.BOUNDED_OK: BOUNDED,
+}
 
 
 def _constant(text: str) -> tuple[str, Any]:
@@ -74,7 +122,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Check TLA+ specifications from the command line.",
         epilog=(
             "Exit codes: 0 the spec checked out, 1 it did not, "
-            "2 the check could not run."
+            "2 the check could not run, 3 it checked out within a bound."
         ),
     )
     parser.add_argument(
@@ -133,7 +181,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _exit_code(outcome: Outcome) -> int:
-    return OK if outcome is Outcome.OK else FOUND_A_PROBLEM
+    """The code for `outcome`, or `CANNOT_RUN` if nobody chose one.
+
+    An unmapped outcome is a hole in this module, not a verdict on the spec, so
+    it falls to 2 -- the code that means "no answer" -- rather than to 1, which
+    would claim something about a spec nobody checked.
+    """
+    return EXIT_CODES.get(outcome, CANNOT_RUN)
 
 
 def _resolve_config(args: argparse.Namespace, spec_path: Path) -> str | None:

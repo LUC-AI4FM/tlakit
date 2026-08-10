@@ -183,6 +183,46 @@ def test_flags_and_a_neighbouring_cfg_together_are_refused(counter, capsys):
     assert "--config" in out
 
 
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ["--invariant", "Safety"],
+        ["--property", "Liveness"],
+        ["--constant", "N=3"],
+        ["--init", "Init"],
+        ["--next", "Next"],
+        ["--specification", "Other"],
+    ],
+)
+def test_an_explicit_config_and_flags_together_are_refused(counter, capsys, flags):
+    """The same rule as a neighbouring .cfg, one branch further along (#87).
+
+    `_resolve_config` returned on `--config` before it could reach the check,
+    so `tlakit check Counter.tla --config c.cfg --invariant Safety` exited 0
+    having checked nothing named Safety -- and 0 means "the spec checked out".
+    """
+    cfg = tmp_cfg(counter)
+    code, out = run(
+        ["check", str(counter), "--config", str(cfg), *flags], FakeRunner(), capsys
+    )
+    assert code == CANNOT_RUN
+    assert "--config" in out
+
+
+def tmp_cfg(counter: Path) -> Path:
+    cfg = counter.parent / "chosen.cfg"
+    cfg.write_text("SPECIFICATION Spec\n", encoding="utf-8")
+    return cfg
+
+
+def test_an_explicit_config_on_its_own_is_still_fine(counter):
+    """The default `--specification Spec` must not trip the refusal."""
+    runner = FakeRunner()
+    cfg = tmp_cfg(counter)
+    assert main(["check", str(counter), "--config", str(cfg)], runner=runner) == OK
+    assert runner.calls[0]["config"] == "SPECIFICATION Spec\n"
+
+
 def test_no_deadlock_check_against_a_raw_config_is_refused(counter, capsys):
     """`api.Spec.check` raises for this; the CLI has to say it better.
 

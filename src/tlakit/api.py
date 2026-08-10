@@ -1,8 +1,10 @@
 """The public surface: Spec, load, check_source."""
 from __future__ import annotations
 
+import inspect
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -171,6 +173,60 @@ def build_config(
     return "\n".join(lines) + "\n"
 
 
+#: Every `build_config` argument, and the `.cfg` line it would have produced.
+#: `Spec.check` refuses each of them alongside `config=`, and names the line in
+#: the error so the caller knows what to write in the file instead.
+#:
+#: The mapping exists so the rule is stated once. It used to be written out by
+#: hand for `check_deadlock` alone, which is how the other six came to be
+#: accepted and silently dropped (#87); a test asserts this is exactly
+#: `build_config`'s signature, so a new argument has to land on one side of
+#: the rule on purpose.
+CONFIG_ARGUMENTS: dict[str, str] = {
+    "spec": "SPECIFICATION",
+    "init": "INIT",
+    "next_": "NEXT",
+    "constants": "CONSTANT",
+    "invariants": "INVARIANT",
+    "properties": "PROPERTY",
+    "check_deadlock": "CHECK_DEADLOCK",
+}
+
+
+def _refuse_alongside_a_raw_config(**given: Any) -> None:
+    """Raise if any config-building argument was passed with `config=`.
+
+    Splicing them onto the end of someone's `.cfg` is not the alternative: it
+    is a third behaviour to explain, and `CONSTANT N = 3` appended to a file
+    that already assigns `N` conflicts silently. Refusing says which line to
+    write instead.
+
+    `spec` is the awkward one -- it has a default, so *every*
+    `check(config=text)` call passes it. Values are compared against
+    `Spec.check`'s own signature so only a caller who actually changed one is
+    refused; getting that wrong would make raw configs unusable, which is a
+    worse bug than the one this fixes.
+    """
+    defaults = _check_defaults()
+    named = [name for name, value in given.items() if value != defaults[name]]
+    if not named:
+        return
+    arguments = " or ".join(f"{name}=" for name in named)
+    lines = " and ".join(CONFIG_ARGUMENTS[name] for name in named)
+    raise ValueError(
+        f"pass {arguments} or config=, not both; a raw config says what it "
+        f"wants with its own {lines} {'lines' if len(named) > 1 else 'line'}."
+    )
+
+
+@lru_cache(maxsize=1)
+def _check_defaults() -> dict[str, Any]:
+    return {
+        name: parameter.default
+        for name, parameter in inspect.signature(Spec.check).parameters.items()
+    }
+
+
 @dataclass
 class Spec:
     """A TLA+ module held in memory.
@@ -233,8 +289,12 @@ class Spec:
     ) -> CheckResult:
         """Model-check with TLC.
 
-        Pass `config` for raw `.cfg` text, or any of `spec`/`init`/`next_`/
-        `constants`/`invariants`/`properties` to have one built.
+        Pass `config` for raw `.cfg` text, *or* any of `spec`/`init`/`next_`/
+        `constants`/`invariants`/`properties`/`check_deadlock` to have one
+        built -- not both. A raw config states what it wants with its own
+        `INVARIANT`, `CONSTANT` and `SPECIFICATION` lines, so an argument
+        passed beside it has nowhere to go; every one of them is refused by
+        name rather than dropped (see `CONFIG_ARGUMENTS`).
 
         `check_deadlock=False` turns off TLC's deadlock check. A specification
         whose behaviours are meant to *finish* has no successor state at the
@@ -251,10 +311,15 @@ class Spec:
                 properties=properties,
                 check_deadlock=check_deadlock,
             )
-        elif check_deadlock is not None:
-            raise ValueError(
-                "pass check_deadlock= or config=, not both; a raw config says "
-                "what it wants with its own CHECK_DEADLOCK line."
+        else:
+            _refuse_alongside_a_raw_config(
+                spec=spec,
+                init=init,
+                next_=next_,
+                constants=constants,
+                invariants=invariants,
+                properties=properties,
+                check_deadlock=check_deadlock,
             )
         options = list(extra_opts or [])
         if coverage and "-coverage" not in options:

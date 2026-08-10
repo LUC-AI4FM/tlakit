@@ -39,6 +39,10 @@ OK = 0
 FOUND_A_PROBLEM = 1
 CANNOT_RUN = 2
 
+#: `api.Spec.check`'s own default. Named here because `_resolve_config` has to
+#: tell "the user chose Spec" from "nobody said", and argparse cannot.
+DEFAULT_SPECIFICATION = "Spec"
+
 
 def _constant(text: str) -> tuple[str, Any]:
     """Parse `NAME=VALUE` into something `build_config` can render.
@@ -107,8 +111,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="assign a CONSTANT; repeatable",
     )
     check.add_argument(
-        "--specification", default="Spec", metavar="NAME",
-        help="the SPECIFICATION operator (default: Spec)",
+        "--specification", default=DEFAULT_SPECIFICATION, metavar="NAME",
+        help=f"the SPECIFICATION operator (default: {DEFAULT_SPECIFICATION})",
     )
     check.add_argument("--init", metavar="NAME", help="use INIT/NEXT instead")
     check.add_argument("--next", dest="next_", metavar="NAME")
@@ -141,12 +145,28 @@ def _resolve_config(args: argparse.Namespace, spec_path: Path) -> str | None:
 
     Precedence is explicit over implicit: `--config` wins, then a `.cfg` next
     to the spec, then the flags. The one case refused outright is flags *and* a
-    neighbouring `.cfg`, because either answer makes the other look ignored.
+    file, because either answer makes the other look ignored -- and that holds
+    whether the file was named by `--config` or found beside the spec. The
+    `--config` branch used to return before it could reach the check, so
+    `--config c.cfg --invariant Safety` exited 0 having checked nothing named
+    Safety (#87).
     """
     built_from_flags = bool(
-        args.invariant or args.property_ or args.constant or args.init or args.next_
+        args.invariant
+        or args.property_
+        or args.constant
+        or args.init
+        or args.next_
+        or args.specification != DEFAULT_SPECIFICATION
     )
     if args.config:
+        if built_from_flags:
+            raise ValueError(
+                f"--config {args.config} was given, but so were config flags. "
+                "A .cfg states what it wants with its own INVARIANT, CONSTANT "
+                "and SPECIFICATION lines. Drop the flags to use the file, or "
+                "drop --config to build a config from them."
+            )
         return Path(args.config).read_text(encoding="utf-8")
     beside = spec_path.with_suffix(".cfg")
     if beside.exists():

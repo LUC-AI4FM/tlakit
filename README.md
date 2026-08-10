@@ -26,7 +26,19 @@ Sweep a constant and get the smallest configuration that breaks:
 sweep = spec.sweep({"Servers": [3, 4, 5]}, invariants=["Inv"],
                    workers=3, heap="2G")
 sweep.first_failure().constants     # {'Servers': 4}
-sweep.to_dataframe()                # one row per configuration
+print(sweep)                        # the grid, with the failures marked
+sweep.to_dataframe()                # the same rows, if you have pandas
+```
+
+```
+SweepResult — 3 configurations, 1 failed
+
+  Servers  outcome              states  distinct  depth   ms  trace
+        3  OK                       30        24      3  300      -
+!       4  INVARIANT_VIOLATION      40        32      4  400      5
+        5  OK                       50        40      5  500      -
+
+  First failure: Servers=4 — sweep.first_failure().result has the trace.
 ```
 
 ## As a Jupyter kernel

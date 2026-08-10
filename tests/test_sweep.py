@@ -224,3 +224,135 @@ def test_sweep_to_dataframe_has_a_row_per_configuration(ready):
     assert len(df) == 3
     assert list(df["Limit"]) == [1, 2, 3]
     assert set(df["outcome"]) == {"ok", "invariant_violation"}
+
+
+# --- printing a sweep (#81) ----------------------------------------------
+
+
+def sweep_of(*outcomes, trace=None):
+    """A sweep over `Servers`, one point per outcome."""
+    runs = []
+    for index, outcome in enumerate(outcomes, start=3):
+        result = CheckResult(
+            outcome, [], trace if outcome is not Outcome.OK else None,
+            Stats(distinct=8 * index, generated=10 * index, depth=index,
+                  duration_ms=100 * index),
+            RAW,
+        )
+        runs.append(Run(constants={"Servers": index}, result=result))
+    return SweepResult(runs=runs)
+
+
+def test_printing_a_sweep_gives_a_grid_not_one_line():
+    """#61 gave CheckResult a __str__ for this reason; a sweep nests one per
+    grid point, so the unreadable line is multiplied rather than merely long."""
+    text = str(sweep_of(Outcome.OK, Outcome.INVARIANT_VIOLATION))
+
+    assert "CheckResult(" not in text
+    assert "RawOutput(" not in text
+    assert "outcome=<Outcome." not in text
+    lines = text.splitlines()
+    assert len(lines) > 3
+    for line in lines:
+        assert len(line) <= 100, line
+
+
+def test_the_grid_shows_a_column_per_constant_and_a_row_per_point():
+    text = str(sweep_of(Outcome.OK, Outcome.INVARIANT_VIOLATION))
+
+    header, *_ = [line for line in text.splitlines() if "outcome" in line]
+    for column in ("Servers", "outcome", "states", "distinct", "depth", "ms"):
+        assert column in header
+    assert "OK" in text and "INVARIANT_VIOLATION" in text
+    assert "24" in text  # distinct at Servers=3
+    assert "32" in text  # distinct at Servers=4
+
+
+def test_the_summary_counts_the_configurations_and_the_failures():
+    text = str(sweep_of(Outcome.OK, Outcome.INVARIANT_VIOLATION, Outcome.OK))
+    assert "3 configurations" in text
+    assert "1 failed" in text
+
+
+def test_the_summary_says_where_it_broke():
+    """`first_failure()` is what the README leads with; printing the sweep
+    should make the same point without a second call."""
+    text = str(sweep_of(Outcome.OK, Outcome.DEADLOCK))
+    assert "first_failure()" in text
+    assert "Servers=4" in text
+
+
+def test_a_clean_sweep_says_so_and_names_no_failure():
+    text = str(sweep_of(Outcome.OK, Outcome.OK))
+    assert "2 configurations" in text
+    assert "failed" not in text
+    assert "first_failure()" not in text
+
+
+def test_an_empty_sweep_prints_something_rather_than_nothing():
+    assert "no configurations" in str(SweepResult())
+
+
+def test_the_counterexamples_are_not_inlined():
+    """One trace per failing point is the wall of text this removes. The
+    summary points at `sweep.first_failure().result`, which prints well."""
+    trace = Trace(
+        states=[flatten_state({"x": 0}), flatten_state({"x": 1})],
+        actions=[Action(name="Increment")],
+    )
+    text = str(sweep_of(Outcome.OK, Outcome.INVARIANT_VIOLATION, trace=trace))
+
+    assert "Increment" not in text
+    assert "2" in text.splitlines()[-1] or "trace" in text  # the length, not the trace
+
+
+def test_a_long_grid_is_truncated_with_a_count_of_what_was_omitted():
+    """`render.trace_text` already does this for states; same pattern."""
+    sweep = sweep_of(*([Outcome.OK] * 40))
+    text = str(sweep)
+
+    assert len(text.splitlines()) < 40
+    assert "omitted" in text
+    assert "40 configurations" in text
+
+
+def test_the_rows_are_what_to_dataframe_builds():
+    """Two column sets that drift is the failure this avoids."""
+    pd = pytest.importorskip("pandas")
+    sweep = sweep_of(Outcome.OK, Outcome.INVARIANT_VIOLATION)
+
+    frame = sweep.to_dataframe()
+
+    assert list(frame.columns) == list(sweep.rows()[0])
+    assert frame.to_dict("records") == sweep.rows()
+
+
+def test_a_notebook_gets_a_table_and_needs_no_pandas(monkeypatch):
+    """`to_dataframe()` was the only readable view, and pandas is not a
+    dependency."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_pandas(name, *args, **kwargs):
+        if name == "pandas":
+            raise ImportError("pandas is not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_pandas)
+    sweep = sweep_of(Outcome.OK, Outcome.INVARIANT_VIOLATION)
+
+    html = sweep._repr_html_()
+
+    assert "<table" in html
+    assert "INVARIANT_VIOLATION" in html
+    assert "Servers" in html
+    assert str(sweep)  # and the text view is pandas-free too
+
+
+def test_repr_is_left_alone():
+    """`repr` stays the faithful dataclass form -- what a debugger and a test
+    failure want. Same reasoning as #61."""
+    sweep = sweep_of(Outcome.OK)
+    assert repr(sweep).startswith("SweepResult(runs=[Run(")
+    assert "CheckResult(" in repr(sweep)

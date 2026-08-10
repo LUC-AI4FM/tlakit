@@ -94,10 +94,16 @@ otherwise cannot:
 | --- | --- |
 | `0` | the spec checked out |
 | `1` | the run succeeded and found something wrong with the spec |
-| `2` | the run did not happen — bad flags, missing file, no JVM |
+| `2` | the run did not happen — bad flags, missing file, no JVM, a timeout, a state space too large to finish |
+| `3` | the run finished *within a bound* and found nothing wrong there |
 
 So `tlakit check Spec.tla && deploy` does not deploy on a violated invariant,
 and a CI job can still tell a real failure from a typo in a path.
+
+`2` covers every way a search can fail to produce an answer, including a
+timeout: nothing was found, so nothing has been shown about the spec. `3` is
+the Apalache case — no counterexample up to the bound it was given, which is a
+weaker claim than `0` and so is kept apart from it.
 
 `--no-deadlock-check` is worth knowing about early: a specification meant to
 *finish* has no successor state at the end, and TLC reports that as

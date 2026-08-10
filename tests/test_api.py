@@ -92,3 +92,97 @@ def test_both_runners_can_parse_now():
 
     assert Spec(source="", name="M", runner=RemoteRunner()).can_parse is True
     assert api.CliRunner.can_parse is True
+
+
+# --- config= and the arguments that build one (#87) -----------------------
+
+MODULE = "---- MODULE M ----\nVARIABLE x\n====\n"
+
+#: One value per `build_config` argument that is *not* its default in
+#: `Spec.check`. Keyed by argument name so the test below can assert this
+#: covers `build_config`'s signature rather than a list copied out of it --
+#: copying is how the six unenforced arguments got there in the first place.
+NON_DEFAULT = {
+    "spec": "Other",
+    "init": "Init",
+    "next_": "Next",
+    "constants": {"N": 3},
+    "invariants": ["Safety"],
+    "properties": ["Liveness"],
+    "check_deadlock": False,
+}
+
+
+class RecordingRunner:
+    """Answers every check with OK, remembering the config it was handed."""
+
+    can_parse = True
+    tools_jar = None
+    community_jar = None
+
+    def __init__(self):
+        self.configs: list[str] = []
+
+    def check(self, source, module, config, **kwargs):
+        from tlakit.result import CheckResult, Outcome, RawOutput, Stats
+
+        self.configs.append(config)
+        return CheckResult(
+            Outcome.OK, [], None, Stats(),
+            RawOutput(argv=["java"], exit_code=0, stdout="", stderr=""),
+        )
+
+
+def test_the_refused_arguments_are_exactly_build_configs_signature():
+    """Derived, not repeated (#87).
+
+    The six arguments this issue is about were unenforced because the rule was
+    written out by hand for `check_deadlock` alone. A `build_config` argument
+    added later must land on one side of this deliberately.
+    """
+    import inspect
+
+    from tlakit.api import CONFIG_ARGUMENTS, build_config
+
+    assert set(CONFIG_ARGUMENTS) == set(inspect.signature(build_config).parameters)
+    assert set(NON_DEFAULT) == set(CONFIG_ARGUMENTS)
+
+
+@pytest.mark.parametrize("argument", sorted(NON_DEFAULT))
+def test_config_alongside_a_config_building_argument_is_refused(argument):
+    """Every one of them, not just `check_deadlock`.
+
+    `spec.check(config=..., invariants=["Safety"])` used to check nothing named
+    Safety and return `Outcome.OK` -- a silent wrong answer, and the worst kind
+    for `check_source`, whose caller in the repair loop is a program.
+    """
+    from tlakit.api import CONFIG_ARGUMENTS, Spec
+
+    spec = Spec(source=MODULE, name="M", runner=RecordingRunner())
+    with pytest.raises(ValueError, match="not both") as caught:
+        spec.check(config="SPECIFICATION Spec\n", **{argument: NON_DEFAULT[argument]})
+    message = str(caught.value)
+    assert f"{argument}=" in message
+    # And it names the .cfg line to write instead, which is the teaching half.
+    assert CONFIG_ARGUMENTS[argument] in message
+
+
+def test_a_raw_config_on_its_own_still_works():
+    """`spec` has a default, so *every* `check(config=...)` call passes it.
+
+    Refusing on that would make raw configs unusable -- a worse bug than the
+    one being fixed -- so the check compares against the signature's default.
+    """
+    from tlakit.api import Spec
+
+    runner = RecordingRunner()
+    Spec(source=MODULE, name="M", runner=runner).check(config="SPECIFICATION Spec\n")
+    assert runner.configs == ["SPECIFICATION Spec\n"]
+
+
+def test_check_source_refuses_the_combination_too():
+    """The call in the LLM repair loop, where nobody is reading the output."""
+    from tlakit.api import check_source
+
+    with pytest.raises(ValueError, match="not both"):
+        check_source(MODULE, config="SPECIFICATION Spec\n", invariants=["Safety"])

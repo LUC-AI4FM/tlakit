@@ -124,3 +124,94 @@ def test_the_filmstrip_renders(ready):
     html = result._repr_html_()
     assert "tlakit-film" in html
     assert html.count("<figure") == len(result.frames)
+
+
+# --- animate and graph are not in conflict (#93) --------------------------
+
+#: What only the animation branch adds. Everything else must be identical
+#: between the two calls, which is what the test below is really pinning.
+ANIMATION_ONLY = {"extra_modules", "collect", "declared"}
+
+
+class KwargRecorder:
+    """Answers OK, remembering the keyword arguments it was called with."""
+
+    can_parse = True
+    tools_jar = None
+    community_jar = None
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def check(self, source, module, config, **kwargs):
+        from tlakit.result import CheckResult, Outcome, RawOutput, Stats
+
+        self.calls.append(kwargs)
+        return CheckResult(
+            Outcome.OK, [], None, Stats(),
+            RawOutput(argv=["java"], exit_code=0, stdout="", stderr=""),
+        )
+
+
+def test_both_branches_of_check_forward_the_same_arguments():
+    """The duplication is the defect, not this instance of it (#93).
+
+    `graph` and `max_graph_nodes` had already fallen out of the animation
+    call; two nearly identical calls will fall out of step again the next time
+    the runner grows an argument. A fake runner catches every future variant
+    in milliseconds, which a real model check with animation would not.
+    """
+    import tlakit
+
+    runner = KwargRecorder()
+    for animate in (False, True):
+        tlakit.Spec(source=CROSS, name="Cross", runner=runner).check(
+            invariants=["Safety"], animate=animate, graph=True, max_graph_nodes=50,
+            timeout=12.5, heap="2G",
+        )
+
+    plain, animated = runner.calls
+    assert set(animated) - set(plain) == ANIMATION_ONLY
+    assert plain == {k: v for k, v in animated.items() if k not in ANIMATION_ONLY}
+
+
+def test_animating_with_a_graph_asks_for_one():
+    """`check(animate=True, graph=True)` used to drop both arguments, and
+    nothing in the result told the caller: `graph` defaults to None whether or
+    not one was asked for, and the frames arrived as requested."""
+    import tlakit
+
+    runner = KwargRecorder()
+    tlakit.Spec(source=CROSS, name="Cross", runner=runner).check(
+        invariants=["Safety"], animate=True, graph=True, max_graph_nodes=50
+    )
+
+    assert runner.calls[0]["graph"] is True
+    assert runner.calls[0]["max_graph_nodes"] == 50
+
+
+@pytest.mark.java
+def test_animating_with_a_graph_returns_both(ready):
+    """TLC's -dump dot and an ALIAS that writes SVG frames are independent, so
+    there is no reason to refuse the combination either."""
+    import tlakit
+
+    result = tlakit.Spec(source=CROSS, name="Cross").check(
+        invariants=["Safety"], animate=True, graph=True
+    )
+
+    assert result.frames
+    assert result.graph is not None
+    assert result.graph.nodes
+
+
+def test_the_remote_runner_still_refuses_animation_rather_than_ignoring_it():
+    """Animation is local-only either way: the service runs one self-contained
+    module, so `extra_modules` has nowhere to go. The refactor above must not
+    turn that refusal into a silent drop."""
+    import tlakit
+    from tlakit.remote import RemoteRunner, Unsupported
+
+    spec = tlakit.Spec(source=CROSS, name="Cross", runner=RemoteRunner())
+    with pytest.raises(Unsupported, match="extra_modules"):
+        spec.check(invariants=["Safety"], animate=True, graph=True)

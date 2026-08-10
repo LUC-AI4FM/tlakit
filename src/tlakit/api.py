@@ -326,17 +326,20 @@ class Spec:
             # TLC gathers no coverage unless asked, and it is not free.
             options += ["-coverage", "1"]
 
+        # Built once and shared by both calls below. Two nearly identical
+        # argument lists is what let `graph` and `max_graph_nodes` fall out of
+        # the animation branch unnoticed (#93); the next argument the runner
+        # grows would have gone the same way.
+        forwarded: dict[str, Any] = {
+            "timeout": timeout,
+            "extra_opts": options,
+            "heap": heap,
+            "graph": graph,
+            "max_graph_nodes": max_graph_nodes,
+        }
+
         if not animate:
-            return self._runner().check(
-                self.source,
-                self.name,
-                config,
-                timeout=timeout,
-                extra_opts=options,
-                heap=heap,
-                graph=graph,
-                max_graph_nodes=max_graph_nodes,
-            )
+            return self._runner().check(self.source, self.name, config, **forwarded)
 
         if not defines_animview(self.source):
             raise ValueError(
@@ -344,17 +347,19 @@ class Spec:
                 "animate. Define `AnimView == Svg(<<...>>, [...])` using the "
                 "SVG.tla operators from CommunityModules."
             )
-        companion = f"{self.name}_anim"
+        # TLC's `-dump dot` and an ALIAS that writes SVG frames are
+        # independent, so animating and graphing together is allowed rather
+        # than refused. Only the remote runner says no, and it says so out
+        # loud: `extra_modules` and `max_graph_nodes` both raise there.
+        variables = declared_variables(self.source)
         return self._runner().check(
-            animation_module(self.name, declared_variables(self.source)),
-            companion,
+            animation_module(self.name, variables),
+            f"{self.name}_anim",
             config + f"ALIAS {ANIM_ALIAS}\n",
-            timeout=timeout,
-            extra_opts=options,
             extra_modules={self.name: self.source},
             collect=f"{FRAME_PREFIX}*.svg",
-            declared=declared_variables(self.source),
-            heap=heap,
+            declared=variables,
+            **forwarded,
         )
 
     def sweep(

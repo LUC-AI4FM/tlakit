@@ -57,10 +57,14 @@ class SweepResult:
         """
         return self.failures[0] if self.failures else None
 
-    def to_dataframe(self):
-        """One row per configuration."""
-        import pandas as pd  # lazy: pandas is not a hard dependency
+    def rows(self) -> list[dict[str, Any]]:
+        """One row per configuration: constants, then what came of them.
 
+        The single place that decides what a row is worth showing.
+        `to_dataframe` wraps this in a DataFrame and the printed and HTML
+        views format it as a table; picking a second column set for each
+        would give three views that drift apart (#81).
+        """
         rows = []
         for run in self.runs:
             stats = run.result.stats
@@ -72,7 +76,23 @@ class SweepResult:
             row["ms"] = stats.duration_ms
             row["trace_len"] = len(run.result.trace) if run.result.trace else 0
             rows.append(row)
-        return pd.DataFrame(rows)
+        return rows
+
+    def to_dataframe(self):
+        """One row per configuration."""
+        import pandas as pd  # lazy: pandas is not a hard dependency
+
+        return pd.DataFrame(self.rows())
+
+    def __str__(self) -> str:
+        from .render import sweep_text  # lazy: render imports result
+
+        return sweep_text(self)
+
+    def _repr_html_(self) -> str:
+        from .render import sweep_html
+
+        return sweep_html(self)
 
 
 def grid_points(grid: dict[str, list[Any]]) -> list[dict[str, Any]]:

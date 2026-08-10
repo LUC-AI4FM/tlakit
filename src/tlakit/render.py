@@ -61,6 +61,7 @@ _CSS = """
 .tlakit-frame figcaption { font-size: 11px; opacity: .7; margin-top: 3px; }
 .tlakit-note { background: rgba(90,130,220,.16); }
 .tlakit-hint { opacity: .75; margin-top: 4px; }
+.tlakit-fail td { background: rgba(210,60,60,.16); }
 </style>
 """
 
@@ -695,3 +696,160 @@ def result_text(result: CheckResult) -> str:
         parts.append(trace_text(result.trace))
 
     return "\n\n".join(p for p in parts if p)
+
+
+# --- sweeps ---------------------------------------------------------------
+#
+# A `SweepResult` holds one `CheckResult` per grid point, so its dataclass
+# repr nests the line #61 already found too wide, once per configuration --
+# tens of kilobytes for a five-point sweep carrying TLC's full stdout. The one
+# thing the reader wants is the shape of the grid and where it broke (#81).
+#
+# Both views render `SweepResult.rows()`, which is also what `to_dataframe`
+# wraps. Three views picking their own columns would be three things to keep
+# in step.
+
+#: Configurations shown before the printed grid is truncated. The same limit
+#: `trace_text` uses for states, for the same reason; two numbers would be two
+#: things to remember.
+MAX_SWEEP_ROWS = 20
+
+#: Column names that read better in a table than as dict keys.
+_SWEEP_LABELS = {"trace_len": "trace"}
+
+
+def _sweep_columns(rows: list[dict[str, Any]]) -> list[str]:
+    columns: list[str] = []
+    for row in rows:
+        for name in row:
+            if name not in columns:
+                columns.append(name)
+    return columns
+
+
+def _sweep_cell(name: str, value: Any) -> str:
+    """One cell. A dash rather than `None` or a bare `0` for "there was none":
+    a trace length of 0 means no counterexample, not a counterexample of no
+    steps, and TLC leaves stats unset when it never got that far."""
+    if value is None or (name == "trace_len" and not value):
+        return "-"
+    if name == "outcome":
+        # `rows()` carries `Outcome.value` because that is what a DataFrame
+        # wants; every other rendered view in this module shows `Outcome.name`,
+        # and the names are exactly the values upper-cased.
+        return str(value).upper()
+    return str(value)
+
+
+def _sweep_headline(sweep: Any) -> str:
+    total = len(sweep.runs)
+    if not total:
+        return "SweepResult — no configurations"
+    failed = len(sweep.failures)
+    plural = "configuration" if total == 1 else "configurations"
+    return f"SweepResult — {total} {plural}, " + (
+        f"{failed} failed" if failed else "all passed"
+    )
+
+
+def _sweep_failure_note(sweep: Any) -> str:
+    """Where it broke, without inlining the counterexample.
+
+    `first_failure()` is what the README leads with, and one trace per failing
+    point is the wall of text this whole view exists to remove. Naming the row
+    and pointing at the call is the same information at a hundredth the size.
+    """
+    first = sweep.first_failure()
+    if first is None:
+        return ""
+    where = first.label or "the only configuration"
+    return _wrap(
+        "First failure: ",
+        f"{where} — sweep.first_failure().result has the trace.",
+    )
+
+
+def sweep_text(sweep: Any) -> str:
+    """A `SweepResult` as a grid: one row per configuration, failures marked."""
+    rows = sweep.rows()
+    headline = _sweep_headline(sweep)
+    if not rows:
+        return headline
+
+    columns = _sweep_columns(rows)
+    header = [_SWEEP_LABELS.get(name, name) for name in columns]
+    cells = [[_sweep_cell(name, row.get(name)) for name in columns] for row in rows]
+    widths = [
+        max(len(header[i]), max(len(row[i]) for row in cells))
+        for i in range(len(columns))
+    ]
+
+    def line(marker: str, values: list[str]) -> str:
+        rendered = [
+            value.ljust(width) if name == "outcome" else value.rjust(width)
+            for name, value, width in zip(columns, values, widths)
+        ]
+        return (marker + "  ".join(rendered)).rstrip()
+
+    total = len(rows)
+    if total <= MAX_SWEEP_ROWS:
+        visible: list[int | None] = list(range(total))
+    else:
+        half = MAX_SWEEP_ROWS // 2
+        visible = list(range(half)) + [None] + list(range(total - half, total))
+
+    lines = [line("  ", header)]
+    for index in visible:
+        if index is None:
+            omitted = total - MAX_SWEEP_ROWS
+            lines.append(
+                f"  ... ({omitted} configuration{'s' if omitted != 1 else ''} "
+                "omitted) ..."
+            )
+            continue
+        failed = not sweep.runs[index].result.ok
+        lines.append(line("! " if failed else "  ", cells[index]))
+
+    parts = [headline, "\n".join(lines), _sweep_failure_note(sweep)]
+    return "\n\n".join(part for part in parts if part)
+
+
+def sweep_html(sweep: Any) -> str:
+    """The same grid for a notebook, and without pandas.
+
+    Not truncated the way `sweep_text` is: a browser scrolls a table, and the
+    reason to cut the printed form -- that it scrolls a terminal past the
+    headline -- does not apply.
+    """
+    rows = sweep.rows()
+    banner = "tlakit-ok" if sweep.ok else "tlakit-bad"
+    parts = [
+        _CSS,
+        '<div class="tlakit">',
+        f'<div class="tlakit-banner {banner}">'
+        f"{escape(_sweep_headline(sweep))}</div>",
+    ]
+    if rows:
+        columns = _sweep_columns(rows)
+        head = "".join(
+            f"<th>{escape(_SWEEP_LABELS.get(name, name))}</th>" for name in columns
+        )
+        body = []
+        for index, row in enumerate(rows):
+            css = "" if sweep.runs[index].result.ok else ' class="tlakit-fail"'
+            cells = "".join(
+                f"<td>{escape(_sweep_cell(name, row.get(name)))}</td>"
+                for name in columns
+            )
+            body.append(f"<tr{css}>{cells}</tr>")
+        parts.append(f"<table><tr>{head}</tr>{''.join(body)}</table>")
+
+    first = sweep.first_failure()
+    if first is not None:
+        where = escape(first.label or "the only configuration")
+        parts.append(
+            f'<div class="tlakit-hint">First failure: {where} — '
+            "<code>sweep.first_failure().result</code> has the trace.</div>"
+        )
+    parts.append("</div>")
+    return "".join(parts)

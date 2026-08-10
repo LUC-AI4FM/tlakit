@@ -369,6 +369,7 @@ class DebugSession:
         self._client: DapClient | None = None
         self._terminated = False
         self._exhausted = False
+        self._thread_id = 0
 
         self._process = subprocess.Popen(
             [
@@ -451,13 +452,15 @@ class DebugSession:
         # stop ahead of the debugger, and the first visible symptom is an
         # evaluation in a frame from before the spec's variables exist -- an
         # "undefined identifier" a long way from its cause. Fail here instead.
-        if self._client.wait_for_event("stopped", timeout=timeout) is None:
+        stop_event = self._client.wait_for_event("stopped", timeout=timeout)
+        if stop_event is None:
             self.close()
             raise DebuggerTimeout(
                 f"the debugger did not suspend before the first ASSUME within "
                 f"{timeout}s, so nothing after this could be read in step with "
                 f"TLC. Pass a larger startup_timeout= if the machine is slow."
             )
+        self._thread_id = stop_event.get("body", {}).get("threadId", 0)
 
     # -- stepping
 
@@ -498,14 +501,20 @@ class DebugSession:
         assert self._client is not None
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if self._client.wait_for_event("stopped", timeout=0.05) is not None:
+            event = self._client.wait_for_event("stopped", timeout=0.05)
+            if event is not None:
+                self._thread_id = event.get("body", {}).get("threadId", 0)
                 return True
             if self._process.poll() is not None:
                 # Drain a stop that was genuinely delivered just before the
                 # exit -- dropping it loses a real state. If TLC is already too
                 # far gone to answer for it, `_request` fails fast and `step`
                 # treats that as exhaustion.
-                return self._client.wait_for_event("stopped", timeout=0.1) is not None
+                event = self._client.wait_for_event("stopped", timeout=0.1)
+                if event is not None:
+                    self._thread_id = event.get("body", {}).get("threadId", 0)
+                    return True
+                return False
         return False
 
     def _request(self, command: str, timeout: float = 15.0, **arguments: Any) -> dict[str, Any]:
@@ -544,7 +553,7 @@ class DebugSession:
             return None
         assert self._client is not None
         try:
-            self._request("continue", threadId=0)
+            self._request("continue", threadId=self._thread_id)
             if not self._await_stop(timeout):
                 self._exhausted = True
                 return None
@@ -567,7 +576,7 @@ class DebugSession:
             return None
         assert self._client is not None
         try:
-            self._request("stepBack", threadId=0)
+            self._request("stepBack", threadId=self._thread_id)
             if not self._await_stop(timeout):
                 return None
             return self._read_trace()
@@ -596,7 +605,7 @@ class DebugSession:
 
     def _top_frame(self) -> dict[str, Any] | None:
         assert self._client is not None
-        frames = self._request("stackTrace", threadId=0).get("stackFrames", [])
+        frames = self._request("stackTrace", threadId=self._thread_id).get("stackFrames", [])
         return frames[0] if frames else None
 
     def _scope_variables(self, name: str) -> list[dict[str, Any]]:

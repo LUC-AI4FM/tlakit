@@ -460,7 +460,7 @@ class DebugSession:
                 f"{timeout}s, so nothing after this could be read in step with "
                 f"TLC. Pass a larger startup_timeout= if the machine is slow."
             )
-        self._thread_id = stop_event.get("body", {}).get("threadId", 0)
+        self._note_stop(stop_event)
 
     # -- stepping
 
@@ -489,6 +489,24 @@ class DebugSession:
         """
         return self._client is not None and not self._exhausted and self.running
 
+    def _note_stop(self, event: dict[str, Any]) -> None:
+        """Remember which thread a stop was announced for.
+
+        Every later `continue`, `stepBack` and `stackTrace` has to name a
+        thread, and the id is TLC's to choose -- it is not always 1, and the
+        hardcoded 0 this replaces made the Windows runner read a stop that
+        carried no states at all, a `list index out of range` several frames
+        from its cause.
+
+        `threadId` is *optional* on a DAP `stopped` event, so a missing one
+        must not be read as thread 0: that would put the original bug back the
+        moment TLC announces a stop without naming a thread. A stop that names
+        no thread says nothing about the thread, so keep the last id that did.
+        """
+        thread_id = event.get("body", {}).get("threadId")
+        if thread_id is not None:
+            self._thread_id = thread_id
+
     def _await_stop(self, timeout: float) -> bool:
         """Wait for the next stop, giving up as soon as TLC is done.
 
@@ -503,7 +521,7 @@ class DebugSession:
         while time.monotonic() < deadline:
             event = self._client.wait_for_event("stopped", timeout=0.05)
             if event is not None:
-                self._thread_id = event.get("body", {}).get("threadId", 0)
+                self._note_stop(event)
                 return True
             if self._process.poll() is not None:
                 # Drain a stop that was genuinely delivered just before the
@@ -512,7 +530,7 @@ class DebugSession:
                 # treats that as exhaustion.
                 event = self._client.wait_for_event("stopped", timeout=0.1)
                 if event is not None:
-                    self._thread_id = event.get("body", {}).get("threadId", 0)
+                    self._note_stop(event)
                     return True
                 return False
         return False

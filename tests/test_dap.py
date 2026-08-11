@@ -336,6 +336,7 @@ def _unstarted_session(tmp_path) -> DebugSession:
     session._client = None
     session._terminated = False
     session._exhausted = False
+    session._thread_id = 0
     session._process = _FakeProcess()
     return session
 
@@ -372,6 +373,37 @@ def test_a_delivered_pre_assume_stop_is_consumed_and_connect_succeeds(monkeypatc
 
     assert session._client.commands == ["initialize", "setBreakpoints", "launch"]
     assert not session._process.terminated
+
+
+def test_the_stopped_thread_is_taken_from_the_debugger_not_assumed(tmp_path):
+    """Which thread TLC stops on is TLC's to say.
+
+    Addressing a thread that does not exist is not a loud failure: the request
+    is answered with nothing, the stop reads back no states, and the test that
+    notices is three frames away asking for `states[-1]`. That is what the
+    Windows runner hit against the hardcoded id this replaces.
+    """
+    session = _unstarted_session(tmp_path)
+
+    session._note_stop({"event": "stopped", "body": {"reason": "breakpoint", "threadId": 17}})
+    assert session._thread_id == 17
+
+
+def test_a_stop_that_names_no_thread_leaves_the_last_one_alone(tmp_path):
+    """`threadId` is optional on a `stopped` event.
+
+    Reading a missing one as thread 0 would put the hardcoded id straight back
+    -- and only for the stops after it, so the session would work until it
+    silently did not.
+    """
+    session = _unstarted_session(tmp_path)
+    session._note_stop({"event": "stopped", "body": {"threadId": 17}})
+
+    session._note_stop({"event": "stopped", "body": {"reason": "breakpoint"}})
+    assert session._thread_id == 17
+
+    session._note_stop({"event": "stopped"})
+    assert session._thread_id == 17
 
 
 # --------------------------------------------------------------------------

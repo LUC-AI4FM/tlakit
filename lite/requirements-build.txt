@@ -4,7 +4,7 @@
 # (@jupyterlab/coreutils 6.6.0 bundled vs ^6.6.1 required) that only shows up as
 # a console warning. Matched pairs do not warn.
 jupyterlite-core==0.8.1
-jupyterlite-pyodide-kernel==0.8.1
+jupyterlite-pyodide-kernel==0.8.3
 # Required by the contents addon to copy `files/` into the site; without it the
 # build fails with "jupyter-server is not installed".
 jupyter-server>=2.0

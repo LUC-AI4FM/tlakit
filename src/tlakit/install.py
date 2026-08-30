@@ -10,13 +10,17 @@ no `-dumpTrace` option, and tlakit passes that on every run.
 from __future__ import annotations
 
 import hashlib
-import shutil
+import sys
 import tempfile
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
 from .jar import COMMUNITY_JAR, TOOLS_JAR, cache_dir
+
+#: Per-download socket timeout, in seconds. A stalled connection should fail
+#: rather than hang the install forever.
+_TIMEOUT = 30
 
 #: First TLA+ tools release with `-dumpTrace`.
 TOOLS_TAG = "v1.8.0"
@@ -71,6 +75,27 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _copy_with_progress(name: str, response, out) -> None:
+    """Stream `response` into `out`, reporting progress on stderr as it goes."""
+    total = getattr(response, "length", None) or 0
+    read = 0
+    for chunk in iter(lambda: response.read(1 << 16), b""):
+        out.write(chunk)
+        read += len(chunk)
+        if total:
+            print(
+                f"\r{name}: {read >> 20} / {total >> 20} MiB "
+                f"({read * 100 // total}%)",
+                end="",
+                file=sys.stderr,
+                flush=True,
+            )
+        else:
+            print(f"\r{name}: {read >> 20} MiB", end="", file=sys.stderr, flush=True)
+    if read:
+        print(file=sys.stderr)
+
+
 def fetch(jar: PinnedJar, force: bool = False) -> Path:
     """Download `jar` into the cache if it is not already there.
 
@@ -87,8 +112,10 @@ def fetch(jar: PinnedJar, force: bool = False) -> Path:
     ) as tmp:
         staging = Path(tmp.name)
     try:
-        with urllib.request.urlopen(jar.url) as response, open(staging, "wb") as out:
-            shutil.copyfileobj(response, out)
+        with urllib.request.urlopen(jar.url, timeout=_TIMEOUT) as response, open(
+            staging, "wb"
+        ) as out:
+            _copy_with_progress(jar.filename, response, out)
         actual = sha256_of(staging)
         if actual != jar.sha256:
             raise ChecksumMismatch(

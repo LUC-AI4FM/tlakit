@@ -25,7 +25,7 @@ def fake_urlopen(payload: bytes):
         def __exit__(self, *exc):
             self.close()
 
-    return lambda url: Response(payload)
+    return lambda url, timeout=None: Response(payload)
 
 
 def pin(sha: str = DIGEST) -> inst.PinnedJar:
@@ -44,7 +44,7 @@ def test_downloads_into_a_version_scoped_path(cache, monkeypatch):
 def test_second_call_does_not_redownload(cache, monkeypatch):
     calls = []
 
-    def counting(url):
+    def counting(url, timeout=None):
         calls.append(url)
         return fake_urlopen(PAYLOAD)(url)
 
@@ -94,7 +94,7 @@ def test_a_new_pin_does_not_overwrite_an_older_one(cache, monkeypatch):
 def test_force_redownloads(cache, monkeypatch):
     calls = []
 
-    def counting(url):
+    def counting(url, timeout=None):
         calls.append(url)
         return fake_urlopen(PAYLOAD)(url)
 
@@ -102,6 +102,25 @@ def test_force_redownloads(cache, monkeypatch):
     inst.fetch(pin())
     inst.fetch(pin(), force=True)
     assert len(calls) == 2
+
+
+def test_download_uses_a_timeout(cache, monkeypatch):
+    """A stalled connection must not hang the install forever (issue #97)."""
+    seen = {}
+
+    def capturing(url, timeout=None):
+        seen["timeout"] = timeout
+        return fake_urlopen(PAYLOAD)(url)
+
+    monkeypatch.setattr(inst.urllib.request, "urlopen", capturing)
+    inst.fetch(pin())
+    assert seen["timeout"] == inst._TIMEOUT
+
+
+def test_download_reports_progress(cache, monkeypatch, capsys):
+    monkeypatch.setattr(inst.urllib.request, "urlopen", fake_urlopen(PAYLOAD))
+    inst.fetch(pin())
+    assert "thing.jar" in capsys.readouterr().err
 
 
 def test_sha256_of_matches_hashlib(tmp_path):

@@ -1,8 +1,9 @@
 """Locate the TLA+ tool jars.
 
 Resolution order: explicit path -> environment variable -> platformdirs cache.
-Downloading a pinned release is deliberately left to M2; until then a missing
-jar is a clear, actionable error rather than a silent fetch.
+This module only *locates* jars; fetching a pinned release is the separate,
+explicit `python -m tlakit.install` (see `tlakit.install`). A missing jar is a
+clear, actionable error rather than a silent fetch.
 """
 from __future__ import annotations
 
